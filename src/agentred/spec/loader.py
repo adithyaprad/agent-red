@@ -1,0 +1,130 @@
+"""Reading a spec off disk, and failing loudly when it does not hold together.
+
+The models in `models.py` do the validating. This module's only job is to turn YAML into
+them and to attach the file and the field path to whatever went wrong, because the person
+who has to fix a bad spec is a merchant integrator reading a stack trace, not the author of
+the validator.
+
+It reads YAML only. Nothing here fetches over the network: retrieving a config from a live
+platform is surface 1 of the integration contract and belongs to whatever implements it,
+not to the contract itself.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import ValidationError
+
+from agentred.spec.models import AgentConfig, AgentPolicy, AgentSpec
+
+CONFIG_FILENAME = "config.yaml"
+POLICY_FILENAME = "policy.yaml"
+
+
+class SpecError(Exception):
+    """A spec could not be read, parsed or validated.
+
+    Raised instead of letting `yaml.YAMLError` or `pydantic.ValidationError` escape, so
+    that callers have one exception type to handle and the message always names the file.
+    """
+
+
+def load_spec(config_path: Path | str, policy_path: Path | str) -> AgentSpec:
+    """Load a config and a policy and check them against each other.
+
+    Args:
+        config_path: Path to the config YAML.
+        policy_path: Path to the policy YAML.
+
+    Returns:
+        A validated `AgentSpec`.
+
+    Raises:
+        SpecError: If either file is missing, is not a YAML mapping, fails its own
+            validation, or the policy does not describe the config (a bound on an undeclared
+            tool, a precondition on an undeclared tool, a scope on an unreachable source).
+    """
+    config_path, policy_path = Path(config_path), Path(policy_path)
+    config = _build(AgentConfig, _read_mapping(config_path), config_path)
+    policy = _build(AgentPolicy, _read_mapping(policy_path), policy_path)
+    try:
+        return AgentSpec(config=config, policy=policy)
+    except ValidationError as error:
+        raise SpecError(
+            f"{policy_path} does not describe {config_path}:\n{_format(error)}"
+        ) from error
+
+
+def load_spec_dir(directory: Path | str) -> AgentSpec:
+    """Load the spec from a directory holding `config.yaml` and `policy.yaml`.
+
+    This is the layout `targets/` uses and the layout the CLI expects, so that a spec is
+    one path a user can point at rather than two they can mismatch.
+
+    Args:
+        directory: Directory containing both files.
+
+    Returns:
+        A validated `AgentSpec`.
+
+    Raises:
+        SpecError: If the directory or either file is missing, or validation fails.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise SpecError(f"{directory} is not a directory")
+    return load_spec(directory / CONFIG_FILENAME, directory / POLICY_FILENAME)
+
+
+def _read_mapping(path: Path) -> dict[str, Any]:
+    """Parse one YAML file that must contain a mapping.
+
+    Raises:
+        SpecError: If the file is missing, unparseable, empty, or not a mapping.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise SpecError(f"{path} does not exist") from error
+    except OSError as error:
+        raise SpecError(f"{path} could not be read: {error}") from error
+
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        raise SpecError(f"{path} is not valid YAML: {error}") from error
+
+    if not isinstance(document, dict):
+        found = "an empty document" if document is None else f"a {type(document).__name__}"
+        raise SpecError(f"{path} must contain a mapping at the top level, found {found}")
+    return document
+
+
+def _build[ModelT: AgentConfig | AgentPolicy](
+    model: type[ModelT], document: dict[str, Any], path: Path
+) -> ModelT:
+    """Validate one parsed document into its model, naming the file on failure.
+
+    Raises:
+        SpecError: On any validation failure.
+    """
+    try:
+        return model.model_validate(document)
+    except ValidationError as error:
+        raise SpecError(f"{path} is not a valid {model.__name__}:\n{_format(error)}") from error
+
+
+def _format(error: ValidationError) -> str:
+    """Render a pydantic error as one indented line per problem.
+
+    Pydantic's own rendering carries a URL and a type code on every line, which buries the
+    field path. What an integrator needs is the path and the message.
+    """
+    lines = []
+    for detail in error.errors():
+        location = ".".join(str(part) for part in detail["loc"]) or "(root)"
+        lines.append(f"  {location}: {detail['msg']}")
+    return "\n".join(lines)
