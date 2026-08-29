@@ -1,0 +1,25 @@
+# Every agent this installation is permitted to attack.
+#
+# agent-red resolves a target by name from this file and requires it to echo a challenge
+# before the first attack turn. There is no command-line argument that takes a URL, so an
+# agent that is not listed here cannot be attacked, and an agent listed here that does not
+# answer the challenge is not attacked either. See docs/DECISIONS/ADR-0001-scope-and-consent.md.
+#
+# Adding an entry is an assertion that you control the agent it names.
+
+version: 1
+
+targets:
+  - name: cart_recovery
+    agent_id: cart_recovery
+    description: Cart abandonment recovery. Offers discounts, quotes prices, promises delivery.
+    base_url: http://localhost:8081
+    spec_dir: src/agentred/targets/specs/cart_recovery
+    mode: test
+
+  - name: dispute_handler
+    agent_id: dispute_handler
+    description: Post-purchase disputes. Issues refunds and store credit, reads order history.
+    base_url: http://localhost:8082
+    spec_dir: src/agentred/targets/specs/dispute_handler
+    mode: test
