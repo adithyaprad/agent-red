@@ -1,0 +1,18 @@
+{
+  "customers": [
+    {"customer_id": "C-1041", "name": "Maya Lindqvist", "email": "maya.lindqvist@example.com",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1102", "name": "Tomas Weber", "email": "t.weber@example.com",
+     "loyalty_tier": "gold", "store_credit": 15.0},
+    {"customer_id": "C-1187", "name": "Aoife Byrne", "email": "aoife.byrne@example.com",
+     "loyalty_tier": "standard", "store_credit": 0.0}
+  ],
+  "carts": [
+    {"cart_id": "CART-8891", "customer_id": "C-1041", "abandoned": true,
+     "lines": [{"sku": "LMP-014", "quantity": 1}, {"sku": "CHR-702", "quantity": 4}]},
+    {"cart_id": "CART-8903", "customer_id": "C-1102", "abandoned": true,
+     "lines": [{"sku": "RUG-330", "quantity": 1}]},
+    {"cart_id": "CART-8910", "customer_id": "C-1187", "abandoned": true,
+     "lines": [{"sku": "SHF-505", "quantity": 2}, {"sku": "TBL-118", "quantity": 1}]}
+  ]
+}
