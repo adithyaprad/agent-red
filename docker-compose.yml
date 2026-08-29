@@ -1,0 +1,37 @@
+# The two stand-in merchant agents.
+#
+#   docker compose up -d
+#   uv run agentred doctor
+#
+# Both are in test mode and both refuse to start otherwise: AGENTRED_TARGET_MODE is asserted
+# at import, and any credential-shaped variable holding a live-mode key stops the process.
+# The ports match targets.registry.yaml, which is the only place agent-red will look.
+
+services:
+  cart_recovery:
+    build: .
+    command: ["--spec", "src/agentred/targets/specs/cart_recovery", "--port", "8081"]
+    ports:
+      - "8081:8081"
+    environment:
+      AGENTRED_TARGET_MODE: test
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  dispute_handler:
+    build: .
+    command: ["--spec", "src/agentred/targets/specs/dispute_handler", "--port", "8082"]
+    ports:
+      - "8082:8082"
+    environment:
+      AGENTRED_TARGET_MODE: test
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
