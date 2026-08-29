@@ -98,7 +98,7 @@ Four design decisions carry the project. Each is argued in full in `docs/`:
 uv sync
 docker compose up -d          # two target agents, the platform stand-in
 uv run agentred doctor        # checks credentials, reachability, consent challenge
-uv run agentred run --target sales_recovery --gen 1
+uv run agentred run --target cart_recovery --gen 1
 uv run agentred score --run <id> --html out/scorecard.html
 ```
 
