@@ -12,6 +12,7 @@ from agentred.llm.client import (
     ModelResponse,
     Route,
     Usage,
+    agent_sdk_env,
     resolve_route,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "ModelResponse",
     "Route",
     "Usage",
+    "agent_sdk_env",
     "resolve_route",
 ]

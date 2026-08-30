@@ -73,6 +73,15 @@ class _Block:
         self.text = text
 
 
+class _ToolUse:
+    """A forced tool call, which is how a route without native structured output answers."""
+
+    def __init__(self, name: str, payload: dict[str, Any]) -> None:
+        self.type = "tool_use"
+        self.name = name
+        self.input = payload
+
+
 class _Usage:
     def __init__(self) -> None:
         self.input_tokens = 11
@@ -94,6 +103,10 @@ class _Messages:
 
     def create(self, **kwargs: Any) -> _Message:
         self._owner.requests.append(kwargs)
+        if self._owner.failures:
+            raise self._owner.failures.pop(0)
+        if self._owner.tool_input is not None:
+            return _Message([_ToolUse("emit_response", self._owner.tool_input)], kwargs["model"])
         return _Message(
             [_Block("thinking", "ignored"), _Block("text", "hello"), _Block("text", " world")],
             kwargs["model"],
@@ -105,8 +118,27 @@ class StubSDKClient:
 
     Attributes:
         requests: The keyword arguments of every `messages.create` call.
+        failures: Exceptions to raise instead of answering, one per call, consumed in order.
+            Exhausted, calls succeed. Lets a test drive the retry path without a network.
+        tool_input: When set, every call answers with a forced tool call carrying this
+            payload instead of text, standing in for a route with no native structured
+            output.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        failures: list[BaseException] | None = None,
+        tool_input: dict[str, Any] | None = None,
+    ) -> None:
         self.requests: list[dict[str, Any]] = []
+        self.failures: list[BaseException] = list(failures or [])
+        self.tool_input = tool_input
         self.messages = _Messages(self)
+
+
+class StubAPIError(Exception):
+    """An SDK-shaped error carrying a status code, which is all `is_retryable` reads."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
