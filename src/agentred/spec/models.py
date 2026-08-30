@@ -326,6 +326,66 @@ Bound = Annotated[NumericBound | EnumeratedBound | RelationalBound, Field(discri
 """Any kind of limit on a tool argument."""
 
 
+class ResultCondition(BaseModel):
+    """What a tool's result has to say for the call to count as having succeeded.
+
+    Without this, "succeeded" can only mean "did not report an error", and a step that ran
+    and returned a negative answer counts as having been taken. That is the difference
+    between an agent that verified nobody and an agent that verified somebody and was told
+    no, and it is the wrong difference to lose: the second is the more alarming of the two
+    and would be reported as compliant.
+
+    The shape stays domain-independent. A field path and a value it has to equal; nothing
+    here knows what is being established.
+
+    Attributes:
+        field: Dotted path into the result, resolved the same way as `ResultReference`.
+        equals: The value that path has to hold. Compared as a string, because a result
+            arrives as JSON and `true` and `"true"` must not be different answers.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    field: str = Field(min_length=1)
+    equals: str = Field(min_length=1)
+
+    @field_validator("equals", mode="before")
+    @classmethod
+    def _stringify(cls, value: Any) -> Any:
+        return str(value).lower() if isinstance(value, bool) else value
+
+    def __str__(self) -> str:
+        """The condition as `field == value`, for verdicts and error messages."""
+        return f"{self.field} == {self.equals}"
+
+    def met_by(self, result: object) -> bool:
+        """Whether a decoded tool result satisfies this condition.
+
+        Args:
+            result: The decoded result of the call.
+
+        Returns:
+            `True` when the path resolves and its value equals `equals` as a string. A path
+            that does not resolve is not met, because a result that does not answer the
+            question has not answered it affirmatively.
+        """
+        current: Any = result
+        for step in self.field.split("."):
+            if isinstance(current, dict):
+                if step not in current:
+                    return False
+                current = current[step]
+            elif isinstance(current, (list, tuple)):
+                try:
+                    current = current[int(step)]
+                except (ValueError, IndexError):
+                    return False
+            else:
+                return False
+        rendered = str(current).lower() if isinstance(current, bool) else str(current)
+        return rendered == self.equals
+
+
 class Precondition(BaseModel):
     """A tool that must have succeeded earlier in the conversation before another is called.
 
@@ -338,6 +398,10 @@ class Precondition(BaseModel):
         tool: The consequential tool that is gated.
         requires: The tool that must have returned successfully earlier in the same
             conversation.
+        succeeds_when: What the required tool's result has to say for the step to count.
+            Omitted means the weaker default: any result that does not report an error. A
+            merchant whose gating step can answer no should declare this, and the scorecard
+            says which of the two was used.
         provenance: Declared by the merchant, or inferred from prose.
         description: What the precondition establishes, in the merchant's terms.
     """
@@ -347,6 +411,7 @@ class Precondition(BaseModel):
     name: str = Field(min_length=1)
     tool: str = Field(min_length=1)
     requires: str = Field(min_length=1)
+    succeeds_when: ResultCondition | None = None
     provenance: Provenance = Provenance.DECLARED
     description: str = Field(default="")
 
