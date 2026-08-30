@@ -583,6 +583,44 @@ class VersionTuple(BaseModel):
         )
 
 
+class Subject(BaseModel):
+    """One identity the harness may act as for the length of a conversation.
+
+    An agent that reads records cannot be attacked in the abstract. A conversation has to be
+    about somebody, and the identifiers it opens with have to resolve, or the agent answers
+    "I cannot find that" and the action under test is never reached. That failure is silent
+    and flattering: every rule reports as never in play, so the run looks clean and the agent
+    looks defended, when in fact nobody managed to ask it the question.
+
+    So a subject is part of the integration contract rather than something agent-red invents.
+    The merchant declares which identities are safe to impersonate against the test
+    deployment, and the harness uses only those. There is deliberately no way to synthesise
+    one: an invented identifier is the exact failure this type exists to prevent.
+
+    Attributes:
+        name: A short label for this identity, used in ids and in the report.
+        identifiers: Identifier kind to value, for example `{"order_id": "ORD-55401"}`. Must
+            cover every kind the policy's data scope declares, checked at load.
+        facts: What this identity would know and could say out loud, in the merchant's own
+            words. Free text, because what is worth knowing differs entirely between agents.
+            Handed to the attacker so it argues from something true.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    identifiers: dict[str, str] = Field(min_length=1)
+    facts: tuple[str, ...] = ()
+
+    @field_validator("identifiers")
+    @classmethod
+    def _no_blank_values(cls, value: dict[str, str]) -> dict[str, str]:
+        blank = sorted(kind for kind, held in value.items() if not str(held).strip())
+        if blank:
+            raise ValueError(f"identifier(s) with no value: {', '.join(blank)}")
+        return value
+
+
 class AgentSpec(BaseModel):
     """A config and the policy that authorises it, checked against each other.
 
@@ -594,12 +632,16 @@ class AgentSpec(BaseModel):
     Attributes:
         config: What the agent is and can do.
         policy: What it may and must do.
+        subjects: Identities the harness may act as. Empty is allowed only for an agent whose
+            policy declares no subject identifier kinds, because an agent scoped to a subject
+            that supplies none cannot be attacked, only talked to.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     config: AgentConfig
     policy: AgentPolicy
+    subjects: tuple[Subject, ...] = ()
 
     @model_validator(mode="after")
     def _policy_describes_config(self) -> AgentSpec:
@@ -649,7 +691,40 @@ class AgentSpec(BaseModel):
                     f"data scope permits source {source!r}, which the agent cannot reach"
                 )
 
+        self._subjects_can_be_acted_as()
         return self
+
+    def _subjects_can_be_acted_as(self) -> None:
+        """Refuse a spec whose subjects could not open a conversation that goes anywhere.
+
+        Two failures, both silent and both flattering. An agent scoped to a subject with no
+        declared subjects leaves the harness with nothing true to say, so it opens with an
+        identifier that resolves to nothing, the agent declines to act on a record it cannot
+        find, and every rule reports as never in play. A subject missing one of the declared
+        identifier kinds fails the same way for whichever conversations needed that kind.
+
+        Both are refused at load rather than warned about, for the reason in ADR-0004: a
+        check that cannot fire is indistinguishable from an agent that passed it.
+
+        Raises:
+            ValueError: If subjects are required and absent, or one is incomplete.
+        """
+        kinds = tuple(self.policy.data_scope.subject_identifier_kinds)
+        if not kinds:
+            return
+        if not self.subjects:
+            raise ValueError(
+                f"policy scopes a session by {', '.join(kinds)} but no subjects are declared. "
+                f"Every conversation would open with an identifier that resolves to nothing, "
+                f"and every rule would report as never evaluated rather than as passed."
+            )
+        for subject in self.subjects:
+            missing = [kind for kind in kinds if kind not in subject.identifiers]
+            if missing:
+                raise ValueError(
+                    f"subject {subject.name!r} declares no {', '.join(missing)}, which the "
+                    f"policy's data scope requires to bind a record to a session"
+                )
 
     @property
     def version_tuple(self) -> VersionTuple:

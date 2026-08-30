@@ -21,6 +21,7 @@ from agentred.spec import (
     Provenance,
     RelationalBound,
     ResultReference,
+    Subject,
     ToolDeclaration,
 )
 
@@ -36,8 +37,22 @@ def tool(name, consequence=Consequence.INERT, arguments=("amount",)):
     )
 
 
+def subjects_for(scope):
+    """One subject covering whatever kinds the scope declares.
+
+    A spec whose policy scopes a session but declares nobody to be is refused at construction,
+    which is the point of that rule. These are unit tests of derivation, so they supply the
+    minimum that satisfies it rather than restating it.
+    """
+    kinds = tuple(scope.subject_identifier_kinds) if scope is not None else ()
+    if not kinds:
+        return ()
+    return (Subject(name="somebody", identifiers={kind: f"{kind}-1" for kind in kinds}),)
+
+
 def spec(tools=(), bounds=(), preconditions=(), scope=None, sources=()):
     return AgentSpec(
+        subjects=subjects_for(scope),
         config=AgentConfig(
             agent_id="a",
             version="1",
@@ -265,10 +280,10 @@ class TestAgainstTheShippedTargets:
     @pytest.fixture(scope="class", params=["cart_recovery", "dispute_handler"])
     @staticmethod
     def target(request):
-        from agentred.spec.loader import load_spec
+        from agentred.spec.loader import load_spec_dir
 
         directory = f"src/agentred/targets/specs/{request.param}"
-        return load_spec(f"{directory}/config.yaml", f"{directory}/policy.yaml")
+        return load_spec_dir(directory)
 
     def test_derives_stakes(self, target):
         assert len(derive_stakes(target)) >= 8

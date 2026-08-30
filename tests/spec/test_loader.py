@@ -48,10 +48,21 @@ data_scope:
 """
 
 
+SUBJECTS = """
+subjects:
+  - name: someone
+    identifiers:
+      customer_id: C-1
+    facts:
+      - They have been waiting a week.
+"""
+
+
 @pytest.fixture
 def spec_dir(tmp_path):
     (tmp_path / "config.yaml").write_text(CONFIG)
     (tmp_path / "policy.yaml").write_text(POLICY)
+    (tmp_path / "subjects.yaml").write_text(SUBJECTS)
     return tmp_path
 
 
@@ -66,7 +77,7 @@ def test_loads_a_valid_spec_directory(spec_dir):
 
 
 def test_loads_explicit_paths(spec_dir):
-    spec = load_spec(spec_dir / "config.yaml", spec_dir / "policy.yaml")
+    spec = load_spec(spec_dir / "config.yaml", spec_dir / "policy.yaml", spec_dir / "subjects.yaml")
     assert spec.policy.is_fully_declared
 
 
@@ -118,3 +129,49 @@ def test_unknown_field_is_rejected_rather_than_ignored(spec_dir):
     (spec_dir / "policy.yaml").write_text(POLICY + "\nrate_limit: 5\n")
     with pytest.raises(SpecError, match="rate_limit"):
         load_spec_dir(spec_dir)
+
+
+class TestSubjects:
+    """An agent scoped to a subject needs somebody real to be, or nothing gets tested."""
+
+    def test_subjects_are_loaded(self, spec_dir):
+        spec = load_spec_dir(spec_dir)
+        assert [s.name for s in spec.subjects] == ["someone"]
+        assert spec.subjects[0].identifiers["customer_id"] == "C-1"
+        assert spec.subjects[0].facts == ("They have been waiting a week.",)
+
+    def test_a_scoped_agent_with_no_subjects_is_refused(self, spec_dir):
+        """Otherwise the harness opens with an identifier that resolves to nothing.
+
+        The agent then declines to act on a record it cannot find, every rule reports as
+        never in play, and the run reads as a clean sheet for an agent nobody questioned.
+        """
+        (spec_dir / "subjects.yaml").unlink()
+        with pytest.raises(SpecError, match="no subjects are declared"):
+            load_spec_dir(spec_dir)
+
+    def test_a_subject_missing_a_declared_kind_is_refused(self, spec_dir):
+        (spec_dir / "subjects.yaml").write_text(
+            "subjects:\n  - name: someone\n    identifiers:\n      email: a@b.test\n"
+        )
+        with pytest.raises(SpecError, match="declares no customer_id"):
+            load_spec_dir(spec_dir)
+
+    def test_an_unscoped_agent_needs_none(self, spec_dir):
+        (spec_dir / "subjects.yaml").unlink()
+        (spec_dir / "policy.yaml").write_text(
+            POLICY.replace("  subject_identifier_kinds: [customer_id]\n", "")
+        )
+        assert load_spec_dir(spec_dir).subjects == ()
+
+    def test_a_blank_identifier_value_is_refused(self, spec_dir):
+        (spec_dir / "subjects.yaml").write_text(
+            "subjects:\n  - name: someone\n    identifiers:\n      customer_id: '  '\n"
+        )
+        with pytest.raises(SpecError, match="no value"):
+            load_spec_dir(spec_dir)
+
+    def test_subjects_must_be_a_list(self, spec_dir):
+        (spec_dir / "subjects.yaml").write_text("subjects: {name: someone}\n")
+        with pytest.raises(SpecError, match="must be a list"):
+            load_spec_dir(spec_dir)

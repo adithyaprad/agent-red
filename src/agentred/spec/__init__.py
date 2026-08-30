@@ -20,6 +20,7 @@ from agentred.spec.models import (
     Provenance,
     RelationalBound,
     ResultReference,
+    Subject,
     ToolDeclaration,
     VersionTuple,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "RelationalBound",
     "ResultReference",
     "SpecError",
+    "Subject",
     "ToolDeclaration",
     "VersionTuple",
     "load_spec",

@@ -27,14 +27,14 @@ from agentred.attacks.mutations import SURFACES, by_id
 from agentred.attacks.stakes import derive_stakes
 from agentred.attacks.techniques import load_corpus
 from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
-from agentred.spec.loader import load_spec
+from agentred.spec.loader import load_spec_dir
 from tests.fakes.model import RecordedModelClient
 
 SPEC_ROOT = "src/agentred/targets/specs"
 
 
 def spec_for(name: str):
-    return load_spec(f"{SPEC_ROOT}/{name}/config.yaml", f"{SPEC_ROOT}/{name}/policy.yaml")
+    return load_spec_dir(f"{SPEC_ROOT}/{name}")
 
 
 @pytest.fixture(scope="module")
@@ -79,10 +79,17 @@ class TestBuildSuite:
     def test_ids_are_unique(self, suite):
         assert len({attack.id for attack in suite}) == len(suite)
 
-    def test_id_names_both_halves(self, suite):
-        stake_id, technique_id = suite[0].id.split("|")
+    def test_id_names_every_coordinate(self, suite):
+        """Stake, technique and identity. A row that cannot say who it was is not traceable."""
+        stake_id, technique_id, subject = suite[0].id.split("|")
         assert stake_id == suite[0].stake.id
         assert technique_id == suite[0].technique.id
+        assert subject == suite[0].subject.name
+
+    def test_an_agent_that_scopes_nothing_keeps_the_shorter_id(self, dispute, corpus):
+        """No identity to be means no identity in the id, rather than an empty field."""
+        unscoped = dispute.model_copy(update={"subjects": ()})
+        assert build_suite(unscoped, corpus=corpus)[0].id.count("|") == 1
 
     def test_sequence_is_deterministic(self, dispute, corpus):
         first = [attack.id for attack in build_suite(dispute, corpus=corpus)]
@@ -388,9 +395,10 @@ class TestScale:
 
 
 class TestMutationsAsTheThirdCoordinate:
-    def test_the_plain_variant_keeps_the_shorter_id(self, suite):
+    def test_the_plain_variant_carries_no_mutation_in_its_id(self, suite):
         """Adding mutations later must not rename every attack that already ran."""
-        assert suite[0].id.count("|") == 1
+        assert not suite[0].id.endswith("|hinglish")
+        assert suite[0].id.count("|") == 2
 
     def test_a_mutated_attack_names_all_three(self, suite):
         mutated = apply_mutations(suite[:1], (by_id("hinglish"),))[-1]
@@ -450,3 +458,41 @@ class TestMutationsAsTheThirdCoordinate:
         already = apply_mutations(suite[:1], (by_id("hinglish"),))
         with pytest.raises(AttackError, match="share the id"):
             apply_mutations(already, (by_id("hinglish"),))
+
+
+class TestIdentityTravels:
+    """Every conversation is about somebody, and the same somebody all the way through."""
+
+    def test_a_variant_keeps_its_plain_attacks_identity(self, suite):
+        """Otherwise plain against variant answers two questions at once."""
+        mutated = apply_mutations(suite[:1], (by_id("hinglish"),))[-1]
+        assert mutated.subject is suite[0].subject
+
+    def test_attacks_sharing_an_opening_share_an_identity(self, dispute, corpus):
+        """An opening turn says who is calling. Two people cannot share one."""
+        for group in group_by_opening(build_suite(dispute, corpus=corpus)):
+            assert len({attack.subject.name for attack in group}) == 1
+
+    def test_every_declared_identity_is_used(self, dispute, corpus):
+        used = {attack.subject.name for attack in build_suite(dispute, corpus=corpus)}
+        assert used == {subject.name for subject in dispute.subjects}
+
+    def test_the_prompt_states_the_identifiers_it_must_not_invent(self, suite):
+        """An identifier the attacker cannot quote is one it will improvise."""
+        attack = suite[0]
+        prompt = attacker_system_prompt(attack)
+        for value in attack.subject.identifiers.values():
+            assert value in prompt
+        for fact in attack.subject.facts:
+            assert fact in prompt
+
+    def test_an_agent_with_no_identities_is_told_it_holds_none(self, dispute, corpus):
+        unscoped = dispute.model_copy(update={"subjects": ()})
+        prompt = attacker_system_prompt(build_suite(unscoped, corpus=corpus)[0])
+        assert "no reference or record" in prompt
+
+    def test_assignment_is_stable_across_builds(self, dispute, corpus):
+        """Two runs of one agent must pair the same identity with the same cell."""
+        first = {a.id: a.subject.name for a in build_suite(dispute, corpus=corpus)}
+        second = {a.id: a.subject.name for a in build_suite(dispute, corpus=corpus)}
+        assert first == second

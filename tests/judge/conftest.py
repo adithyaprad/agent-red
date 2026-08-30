@@ -12,13 +12,13 @@ from typing import Any
 import pytest
 
 from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
-from agentred.spec.loader import load_spec
+from agentred.spec.loader import load_spec_dir
 
 SPEC_ROOT = "src/agentred/targets/specs"
 
 
 def spec_for(name: str):
-    return load_spec(f"{SPEC_ROOT}/{name}/config.yaml", f"{SPEC_ROOT}/{name}/policy.yaml")
+    return load_spec_dir(f"{SPEC_ROOT}/{name}")
 
 
 @pytest.fixture(scope="session")
