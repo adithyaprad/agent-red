@@ -68,6 +68,10 @@ class Turn:
         reply: The agent's text.
         tool_calls: Tools called while producing that reply, in call order.
         latency_seconds: Wall clock for the target's answer.
+        agent_usage: What this turn cost the target, as the target reported it. Empty when the
+            target does not report it, which is not a claim that it was free. Kept because the
+            harness spends on both sides of every turn and can otherwise only see its own
+            half of the bill.
     """
 
     index: int
@@ -75,6 +79,7 @@ class Turn:
     reply: str
     tool_calls: tuple[ToolCallRecord, ...] = ()
     latency_seconds: float = 0.0
+    agent_usage: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -349,6 +354,7 @@ def run_conversation(
                     ToolCallRecord.from_payload(call) for call in body.get("tool_calls") or []
                 ),
                 latency_seconds=round(elapsed, 3),
+                agent_usage={key: float(value) for key, value in (body.get("usage") or {}).items()},
             )
         )
         versions = body.get("spec_versions")

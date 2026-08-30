@@ -27,6 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentred.llm.client import agent_sdk_env, resolve_route
 from agentred.spec import AgentSpec
 from agentred.targets._guard import TEST_MODE, assert_test_mode
 from agentred.targets.tools import TOOLSETS
@@ -99,6 +100,8 @@ class ChatResponse(BaseModel):
         spec_versions: The four versions this behaviour belongs to, so a transcript can
             never be attributed to a version of the agent that did not produce it.
         session: Echo of the session id.
+        usage: What this turn cost the target, as its own model reported it. Empty from a
+            backend that does not report it, which is not the same as free.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -107,6 +110,7 @@ class ChatResponse(BaseModel):
     tool_calls: list[ToolCall]
     spec_versions: dict[str, str]
     session: str
+    usage: dict[str, float] = {}
 
 
 class ForkRequest(BaseModel):
@@ -179,6 +183,10 @@ class Session:
             prefix without sharing a future.
         fork_at: The message the branch rewinds to, when it was taken mid-conversation.
         calls: Tool calls made during the turn currently being served.
+        usage: What the turn currently being served cost, as the backend reported it. Reset
+            per turn alongside `calls`. Carried because a target's own spend is otherwise
+            invisible to the harness: it happens inside the Agent SDK, and without it a run
+            can only report half its bill.
         checkpoints: One entry per completed turn, in order.
     """
 
@@ -188,6 +196,7 @@ class Session:
     fork_pending: bool = False
     fork_at: str | None = None
     calls: list[ToolCall] = field(default_factory=list)
+    usage: dict[str, float] = field(default_factory=dict)
     checkpoints: list[Checkpoint] = field(default_factory=list)
 
     def checkpoint(self) -> None:
@@ -335,12 +344,14 @@ class TargetAgent:
 
         session = self.session(request.session)
         session.calls = []
+        session.usage = {}
         reply = await self.backend.reply(session, request.conversation)
         session.checkpoint()
         versions = self.spec.version_tuple
         return ChatResponse(
             reply=reply,
             tool_calls=list(session.calls),
+            usage=dict(session.usage),
             spec_versions={
                 "config": versions.config_version,
                 "policy": versions.policy_version,
@@ -398,8 +409,20 @@ class ClaudeAgentBackend:
     """
 
     def __init__(self) -> None:
-        """Build a backend. Call `attach` before the first reply."""
+        """Build a backend, resolving the model route now rather than on the first turn.
+
+        Resolving here means a target served against a route the Agent SDK cannot use, or
+        with a region missing, fails before the socket opens. Discovering it on the first
+        turn instead would put the failure inside a conversation, where it is indexed under
+        the attack that happened to be running.
+
+        Raises:
+            LLMConfigurationError: If no route resolves, or the resolved route cannot serve
+                an Agent SDK target.
+        """
         self.agent: TargetAgent | None = None
+        self.route = resolve_route()
+        self.env = agent_sdk_env(self.route)
 
     def attach(self, agent: TargetAgent) -> None:
         """Bind this backend to the agent whose tools it should expose."""
@@ -439,14 +462,20 @@ class ClaudeAgentBackend:
 
     async def reply(self, session: Session, conversation: list[ChatMessage]) -> str:
         """Send the last user turn to the model and collect the reply."""
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ClaudeSDKClient,
+            ResultMessage,
+        )
         from claude_agent_sdk import TextBlock as SdkTextBlock
 
         agent = self._require_agent()
         server = self._server(session)
         options = ClaudeAgentOptions(
             system_prompt=agent.spec.config.instructions,
-            model=agent.spec.config.model,
+            model=self.route.model_id(agent.spec.config.model),
+            env=self.env,
             mcp_servers={"shop": server},
             allowed_tools=[f"mcp__shop__{tool.name}" for tool in agent.spec.config.tools],
             permission_mode="bypassPermissions",
@@ -469,10 +498,43 @@ class ClaudeAgentBackend:
                     )
                     if uuid := getattr(message, "uuid", None):
                         session.last_message_uuid = uuid
+                if isinstance(message, ResultMessage):
+                    session.usage = _usage_of(message)
                 session_id = getattr(message, "session_id", None)
                 if session_id:
                     session.model_session_id = session_id
         return "".join(parts).strip()
+
+
+def _usage_of(result: Any) -> dict[str, float]:
+    """Flatten what one turn cost out of the SDK's result message.
+
+    An agent turn is not one model call. It is however many the agent needed to read its
+    tools and answer, which is exactly why the harness cannot infer this from the outside and
+    has to be told.
+
+    Args:
+        result: The SDK `ResultMessage` closing a turn.
+
+    Returns:
+        Token counts, and `cost_usd` when the SDK priced the turn. It does not always: on a
+        route where it does not hold the price list, the cost is absent rather than zero, and
+        the difference matters because zero is a claim and absent is not.
+    """
+    usage = getattr(result, "usage", None) or {}
+    if not isinstance(usage, dict):
+        usage = getattr(usage, "__dict__", {})
+    flat = {
+        "input_tokens": float(usage.get("input_tokens", 0) or 0),
+        "output_tokens": float(usage.get("output_tokens", 0) or 0),
+        "cache_read_tokens": float(usage.get("cache_read_input_tokens", 0) or 0),
+        "cache_write_tokens": float(usage.get("cache_creation_input_tokens", 0) or 0),
+        "model_turns": float(getattr(result, "num_turns", 0) or 0),
+    }
+    cost = getattr(result, "total_cost_usd", None)
+    if cost is not None:
+        flat["cost_usd"] = float(cost)
+    return flat
 
 
 def build_agent(spec: AgentSpec, backend: AgentBackend | None = None) -> TargetAgent:
