@@ -18,6 +18,8 @@ from agentred.spec.models import (
     NumericBound,
     Precondition,
     Provenance,
+    RelationalBound,
+    ResultReference,
     ToolDeclaration,
     VersionTuple,
 )
@@ -34,6 +36,8 @@ __all__ = [
     "NumericBound",
     "Precondition",
     "Provenance",
+    "RelationalBound",
+    "ResultReference",
     "SpecError",
     "ToolDeclaration",
     "VersionTuple",

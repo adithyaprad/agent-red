@@ -14,6 +14,8 @@ from agentred.spec import (
     NumericBound,
     Precondition,
     Provenance,
+    RelationalBound,
+    ResultReference,
     ToolDeclaration,
 )
 
@@ -49,6 +51,96 @@ def policy(**kwargs):
 DISCOUNT_CEILING = NumericBound(
     name="discount_ceiling", tool="apply_discount", argument="pct", maximum=10
 )
+
+
+class TestResultReference:
+    """Reading a figure out of a decoded tool result."""
+
+    @pytest.mark.parametrize(
+        "field,expected",
+        [
+            ("total", 352.0),
+            ("lines.0.price", 145.0),
+            ("lines.1.price", 189.0),
+        ],
+    )
+    def test_resolves_a_dotted_path(self, field, expected):
+        result = {
+            "total": 352,
+            "lines": [{"price": 145}, {"price": 189}],
+        }
+        assert ResultReference(tool="lookup_order", field=field).resolve(result) == expected
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "missing",
+            "total.deeper",
+            "lines.9.price",
+            "lines.first.price",
+        ],
+    )
+    def test_an_unresolvable_path_is_none_not_zero(self, field):
+        """`None` means the bound could not be evaluated, never that it was satisfied.
+
+        Returning 0.0 here would make every unresolvable relational bound report a
+        violation on any positive argument, which is the loudest possible wrong answer.
+        """
+        result = {"total": 352, "lines": [{"price": 145}]}
+        assert ResultReference(tool="lookup_order", field=field).resolve(result) is None
+
+    @pytest.mark.parametrize("value", ["352", None, True, {"a": 1}, [1]])
+    def test_a_non_numeric_value_is_none(self, value):
+        assert ResultReference(tool="t", field="f").resolve({"f": value}) is None
+
+    def test_reads_as_tool_dot_field(self):
+        assert str(ResultReference(tool="lookup_order", field="total")) == "lookup_order.total"
+
+
+class TestRelationalBounds:
+    """Limits whose ceiling is a figure the agent read earlier in the conversation."""
+
+    def test_needs_at_least_one_reference(self):
+        with pytest.raises(ValidationError, match="neither maximum_from nor minimum_from"):
+            RelationalBound(name="b", tool="issue_refund", argument="amount")
+
+    @pytest.mark.parametrize(
+        "value,permitted",
+        [(351.0, True), (352.0, True), (352.01, False), (500.0, False)],
+    )
+    def test_the_ceiling_is_inclusive(self, value, permitted):
+        bound = RelationalBound(
+            name="b",
+            tool="issue_refund",
+            argument="amount",
+            maximum_from=ResultReference(tool="lookup_order", field="total"),
+        )
+        assert bound.permits(value, maximum=352.0, minimum=None) is permitted
+
+    def test_an_unresolved_limit_does_not_constrain(self):
+        """Because the detector, which has the transcript, must report that difference.
+
+        A bound whose figure was never fetched has not been satisfied and has not been
+        violated. It has not been evaluated, and deciding that here would hide it.
+        """
+        bound = RelationalBound(
+            name="b",
+            tool="issue_refund",
+            argument="amount",
+            maximum_from=ResultReference(tool="lookup_order", field="total"),
+        )
+        assert bound.permits(10_000.0, maximum=None, minimum=None) is True
+
+    def test_source_tools_are_deduplicated(self):
+        reference = ResultReference(tool="lookup_order", field="total")
+        bound = RelationalBound(
+            name="b",
+            tool="issue_refund",
+            argument="amount",
+            maximum_from=reference,
+            minimum_from=reference,
+        )
+        assert bound.source_tools == ("lookup_order",)
 
 
 class TestBounds:
@@ -137,6 +229,54 @@ class TestSpecCrossValidation:
         bound = NumericBound(name="b", tool="apply_discount", argument="amount", maximum=10)
         with pytest.raises(ValidationError, match="declares no such argument"):
             AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+    def test_rejects_a_relational_bound_reading_an_undeclared_tool(self):
+        """The source tool is checked exactly as hard as the constrained tool.
+
+        A bound whose ceiling comes from a tool the agent cannot call is a bound that can
+        never be evaluated, which reads as a passing agent forever.
+        """
+        bound = RelationalBound(
+            name="refund_within_total",
+            tool="apply_discount",
+            argument="pct",
+            maximum_from=ResultReference(tool="lookup_order", field="total"),
+        )
+        with pytest.raises(ValidationError, match="reads its limit from tool 'lookup_order'"):
+            AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+    def test_rejects_a_relational_bound_reading_its_own_tool(self):
+        """A call cannot be bounded by its own result, because the result comes after it.
+
+        Nothing at runtime would crash on this. The detector would simply never find the
+        figure, and the bound would silently never fire, so it is refused at load instead.
+        """
+        bound = RelationalBound(
+            name="self_referential",
+            tool="apply_discount",
+            argument="pct",
+            maximum_from=ResultReference(tool="apply_discount", field="total"),
+        )
+        with pytest.raises(ValidationError, match="the tool it constrains"):
+            AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+    def test_accepts_a_relational_bound_reading_a_declared_tool(self):
+        bound = RelationalBound(
+            name="discount_within_total",
+            tool="apply_discount",
+            argument="pct",
+            maximum_from=ResultReference(tool="lookup_cart", field="total"),
+        )
+        spec = AgentSpec(
+            config=config(
+                tools=(
+                    tool("apply_discount", Consequence.MONEY, ("pct",)),
+                    tool("lookup_cart", Consequence.DISCLOSURE, ("cart_id",)),
+                )
+            ),
+            policy=policy(bounds=(bound,)),
+        )
+        assert spec.bounds_for("apply_discount") == (bound,)
 
     def test_rejects_a_precondition_on_an_undeclared_tool(self):
         pre = Precondition(name="p", tool="apply_discount", requires="verify_order")

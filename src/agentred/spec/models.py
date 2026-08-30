@@ -203,8 +203,127 @@ class EnumeratedBound(BaseModel):
         return str(value) in self.allowed_values
 
 
-Bound = Annotated[NumericBound | EnumeratedBound, Field(discriminator="kind")]
-"""Either kind of limit on a tool argument."""
+class ResultReference(BaseModel):
+    """A pointer to one field of one tool's result.
+
+    The field path is dotted and may index a list, so `lines.0.price` reads the first line's
+    price. A path is resolved against a decoded JSON result; nothing here does the resolving,
+    because these models never touch a transcript.
+
+    Attributes:
+        tool: The tool whose result holds the value.
+        field: Dotted path into that result, for example `total` or `lines.0.price`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str = Field(min_length=1)
+    field: str = Field(min_length=1)
+
+    def __str__(self) -> str:
+        """The reference as `tool.field`, for verdicts and error messages."""
+        return f"{self.tool}.{self.field}"
+
+    def resolve(self, result: object) -> float | None:
+        """Read this reference's value out of a decoded tool result.
+
+        Args:
+            result: The decoded result of a call to `self.tool`.
+
+        Returns:
+            The value as a float, or `None` if the path does not exist or the value at the
+            end of it is not a number. `None` means "this bound has nothing to compare
+            against", never "the bound was satisfied".
+        """
+        current: Any = result
+        for step in self.field.split("."):
+            if isinstance(current, dict):
+                if step not in current:
+                    return None
+                current = current[step]
+            elif isinstance(current, (list, tuple)):
+                try:
+                    current = current[int(step)]
+                except (ValueError, IndexError):
+                    return None
+            else:
+                return None
+        if isinstance(current, bool) or not isinstance(current, (int, float)):
+            return None
+        return float(current)
+
+
+class RelationalBound(BaseModel):
+    """A limit on one argument whose value comes from something the agent already read.
+
+    Some limits are not constants. "Do not give back more than was taken" bounds an argument
+    by a figure the agent fetched earlier in the same conversation, so the ceiling is
+    different for every conversation and cannot be written into the policy as a number.
+
+    This is deliberately not a judgement call. The figure is in the tool-call log next to the
+    argument that exceeded it, so a detector asserts it and no model is asked. Expressing it
+    any other way would move a decidable question onto the LLM judge, which the project treats
+    as a regression.
+
+    The shape stays domain-independent: an argument, a reference into an earlier result, and a
+    comparison. Nothing here knows what is being bounded or why.
+
+    At least one of `maximum_from` and `minimum_from` must be set.
+
+    Attributes:
+        kind: Discriminator, always `relational`.
+        name: Stable identifier for this bound. Appears in verdicts and on the scorecard.
+        tool: The tool this constrains.
+        argument: The argument of that tool this constrains.
+        maximum_from: Reference whose value is the largest permitted value, inclusive.
+        minimum_from: Reference whose value is the smallest permitted value, inclusive.
+        provenance: Declared by the merchant, or inferred from prose.
+        description: Why the bound exists, in the merchant's terms.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["relational"] = "relational"
+    name: str = Field(min_length=1)
+    tool: str = Field(min_length=1)
+    argument: str = Field(min_length=1)
+    maximum_from: ResultReference | None = None
+    minimum_from: ResultReference | None = None
+    provenance: Provenance = Provenance.DECLARED
+    description: str = Field(default="")
+
+    @model_validator(mode="after")
+    def _at_least_one_limit(self) -> RelationalBound:
+        if self.maximum_from is None and self.minimum_from is None:
+            raise ValueError(
+                f"relational bound {self.name!r} sets neither maximum_from nor minimum_from"
+            )
+        return self
+
+    @property
+    def source_tools(self) -> tuple[str, ...]:
+        """Every tool this bound has to read a result from, without duplicates."""
+        names: list[str] = []
+        for reference in (self.maximum_from, self.minimum_from):
+            if reference is not None and reference.tool not in names:
+                names.append(reference.tool)
+        return tuple(names)
+
+    def permits(self, value: float, *, maximum: float | None, minimum: float | None) -> bool:
+        """Whether `value` is inside this bound, given limits already resolved from the log.
+
+        The caller resolves the references, because only the caller has the transcript. An
+        unresolved limit is passed as `None` and does not constrain: a bound that could not
+        find its figure has not been satisfied, it has not been evaluated, and the detector
+        is responsible for reporting that difference rather than hiding it here.
+        """
+        if maximum is not None and value > maximum:
+            return False
+        return not (minimum is not None and value < minimum)
+
+
+Bound = Annotated[NumericBound | EnumeratedBound | RelationalBound, Field(discriminator="kind")]
+"""Any kind of limit on a tool argument."""
 
 
 class Precondition(BaseModel):
@@ -437,6 +556,18 @@ class AgentSpec(BaseModel):
                     f"bound {bound.name!r} constrains argument {bound.argument!r} of tool "
                     f"{bound.tool!r}, which declares no such argument"
                 )
+            if isinstance(bound, RelationalBound):
+                for source in bound.source_tools:
+                    if source not in tools:
+                        raise ValueError(
+                            f"bound {bound.name!r} reads its limit from tool {source!r}, "
+                            f"which is not declared"
+                        )
+                    if source == bound.tool:
+                        raise ValueError(
+                            f"bound {bound.name!r} reads its limit from {source!r}, the tool "
+                            f"it constrains. A call cannot be bounded by its own result."
+                        )
 
         for precondition in self.policy.preconditions:
             for field, name in (("tool", precondition.tool), ("requires", precondition.requires)):
@@ -465,7 +596,7 @@ class AgentSpec(BaseModel):
             tool_version=self.config.tool_version,
         )
 
-    def bounds_for(self, tool: str) -> tuple[NumericBound | EnumeratedBound, ...]:
+    def bounds_for(self, tool: str) -> tuple[NumericBound | EnumeratedBound | RelationalBound, ...]:
         """Every bound constraining `tool`, in policy order."""
         return tuple(bound for bound in self.policy.bounds if bound.tool == tool)
 
