@@ -16,8 +16,8 @@ in order for testing to become possible at all.
 
 ## Decision
 
-Two objects, versioned separately, paired at load time into an `AgentSpec` that is
-validated against itself.
+Two versioned objects, plus one unversioned set of fixtures, paired at load time into an
+`AgentSpec` that is validated against itself.
 
 **Config** is capability. Instructions, tool declarations carrying a JSON schema and a
 `consequence` of `money | obligation | disclosure | inert`, and the data sources the agent
@@ -38,7 +38,22 @@ proceeded anyway would then be indistinguishable, and the second is the more ser
 weaker reading remains the default for a policy that declares nothing, and every verdict
 states which of the two was applied.
 
-Four consequences of that split are load bearing.
+**Subjects** are who the harness may act as. An agent that reads records cannot be attacked in
+the abstract: a conversation has to be about somebody, and the identifiers it opens with have to
+resolve. Without them the harness improvises a reference, the agent correctly declines to act on
+a record it cannot find, and the action under test is never reached. Every rule then reports as
+never evaluated, which is honest for one conversation and worthless in aggregate, because it is
+indistinguishable at a glance from an agent that held. So a policy declaring
+`subject_identifier_kinds` requires subjects supplying every one of those kinds, and both the
+absence and an incomplete entry are refused at load.
+
+They sit in a third file rather than inside the policy, and are deliberately not versioned with
+it. The policy version is one quarter of the tuple a scorecard is valid for, so folding fixtures
+into policy would mean that adding somebody to impersonate silently invalidates every scorecard
+already produced for an agent whose rules did not change. There is no way to synthesise a
+subject: an invented identifier is the failure this object exists to prevent.
+
+Five consequences of that split are load bearing.
 
 **Capability and authorisation are separate objects.** Every system that grants power to an
 actor separates the two, and here the separation decides what remedies exist. A structured

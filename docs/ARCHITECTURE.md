@@ -30,6 +30,7 @@ agent-red reads what the merchant built, and derives the attack suite from it.
 |---|---|---|
 | **Config** | What the agent *is* and *can do*: instructions, tools with schemas, reachable data | One retrievable, versioned object |
 | **Policy** | What the agent *may* and *must* do: bounds, required preconditions, session data scope | Separate from config, and structured rather than prose |
+| **Subjects** | Who the harness may act as: identities the merchant declares as safe to impersonate against a test deployment, with what each would know | Present whenever the policy scopes a session to a subject |
 
 The split matters: config is capability, policy is authorisation, and every system that grants
 power to an actor separates the two. It also decides what remedies exist. A structured policy
@@ -37,13 +38,23 @@ can be tightened, which makes a violation unreachable. A limit written as Englis
 system prompt can only be reworded, which makes a violation less likely. See
 `docs/DECISIONS/ADR-0003-instruction-vs-permission.md`.
 
+Subjects are the part most easily mistaken for a convenience. An agent that reads records
+cannot be attacked in the abstract: the conversation has to be about somebody, and the
+identifiers it opens with have to resolve or the agent declines to act on a record it cannot
+find. The action under test is then never reached, every rule reports as never evaluated, and
+the run reads as a clean sheet for an agent nobody managed to question. A policy that scopes a
+session and declares nobody to be is refused at load rather than warned about, for the same
+reason a self-contradicting spec is: a check that cannot fire is indistinguishable from a
+passing agent.
+
 *Degraded mode.* Where policy is prose, `attacks/stakes.py` extracts candidate bounds and
 preconditions from the prompt with a model, and every check derived that way is labelled
 `inferred` rather than `declared` on the scorecard. Uncertainty at the foundation is worse
 than uncertainty at the edges, so it is reported rather than hidden.
 
-*Failure mode if absent:* stakes cannot be derived, attacks fall back to generic probing, and
-the suite loses most of its power.
+*Failure mode if absent:* without config or policy, stakes cannot be derived, attacks fall back
+to generic probing, and the suite loses most of its power. Without subjects, the suite still
+runs and still reports honestly, and reports nothing: every check comes back never evaluated.
 
 ### Surface 2: the agent is exercisable
 
