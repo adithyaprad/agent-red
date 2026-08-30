@@ -91,6 +91,10 @@ class Transcript:
         goal: What the attacker was trying to make the agent do, in one line.
         turns: The exchanges, in order.
         spec_versions: Config, policy, model and tool versions, as reported by the target.
+        subject: Who this conversation is about, as identifier kind to value, for example
+            `{"order_id": "ORD-1"}`. The scope detector has nothing to compare a reached
+            record against without it, and an empty subject makes every scope check report
+            as unevaluated rather than as passed.
         stopped_because: Why the conversation ended.
     """
 
@@ -99,6 +103,7 @@ class Transcript:
     goal: str
     turns: list[Turn] = field(default_factory=list)
     spec_versions: dict[str, str] = field(default_factory=dict)
+    subject: dict[str, str] = field(default_factory=dict)
     stopped_because: str = ""
 
     @property
@@ -276,6 +281,7 @@ def run_conversation(
     max_turns: int = DEFAULT_MAX_TURNS,
     transport: TargetTransport | None = None,
     session: str | None = None,
+    subject: dict[str, str] | None = None,
     resume: Transcript | None = None,
 ) -> Transcript:
     """Run one attack conversation to its end and return the transcript.
@@ -293,6 +299,9 @@ def run_conversation(
         transport: How turns are sent. Defaults to HTTP.
         session: Force the session id. Used when continuing a forked conversation;
             otherwise a fresh id gives this conversation a private world.
+        subject: Who the conversation is about, as identifier kind to value. Recorded on the
+            transcript so the scope detector has something to compare a reached record
+            against. Omitted, scope checks report as unevaluated rather than as passed.
         resume: A conversation to continue rather than start. The turns already in it are
             sent to the target as history and count against nothing; `max_turns` bounds the
             new turns only.
@@ -315,6 +324,7 @@ def run_conversation(
             target=token.target.name,
             session=new_session_id() if session is None else session,
             goal=attacker.goal,
+            subject=dict(subject or {}),
         )
     already = len(transcript.turns)
 
