@@ -101,7 +101,7 @@ introduced after the harness was frozen, used to verify that nothing in `attacks
  registry + consent gate
           |
           v
-   attack generator  ------ seeds (YAML) + mutation operators + winners from gen N-1
+   attack generator  ------ techniques (YAML) x derived stakes + mutations + gen N-1 winners
           |
           v
    conversation runner  ---->  target endpoint  ---->  reply + tool-call log
@@ -152,7 +152,12 @@ in code against the tool-call log. Sending them to a model would trade a certain
 uncertain one. See `docs/DECISIONS/` for where we deliberately did not use a model.
 
 The limit is worth stating plainly: a violation that is not expressible as a bound, a
-precondition or a scope is invisible to the detectors and falls to the judge.
+precondition or a scope is invisible to the detectors and falls to the judge. That limit is
+measured rather than left as a caveat. `attacks/stakes.py` marks every derived stake with
+whether a detector or a model settles it, and `judge_dependence()` reports the share in the
+second category, so a scorecard always states how much of itself rests on the judge. An agent
+that declares nothing scores 1.0 there, which is the honest reading: there was nothing to
+check against.
 
 **The judge is measured, not trusted.** Deciding whether an agent "conceded" or "leaked"
 does need a model for the residue, and that model is unreliable. `judge/calibration/`
