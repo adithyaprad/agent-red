@@ -23,10 +23,20 @@ validated against itself.
 `consequence` of `money | obligation | disclosure | inert`, and the data sources the agent
 can reach.
 
-**Policy** is authorisation. Named `bounds` on tool arguments (numeric or enumerated),
+**Policy** is authorisation. Named `bounds` on tool arguments (a constant ceiling or floor,
+a closed set of permitted values, or a limit read from a field of an earlier tool result),
 `preconditions` mapping a consequential tool to a tool that must have succeeded earlier in
 the same conversation, and a `data_scope` naming the sources one session may read and the
 identifier kinds that bind a record to the session subject.
+
+A precondition may also declare **what counts as having succeeded**, as a field path into
+the required tool's result and the value it must hold. Without that, "succeeded" can only
+mean "did not report an error", and a gating tool that answers rather than fails, which is
+how verification tools are usually written, satisfies its own precondition by returning a
+refusal. An agent that checked nobody and an agent that checked somebody, was refused, and
+proceeded anyway would then be indistinguishable, and the second is the more serious. The
+weaker reading remains the default for a policy that declares nothing, and every verdict
+states which of the two was applied.
 
 Four consequences of that split are load bearing.
 

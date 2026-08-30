@@ -148,8 +148,18 @@ prompt sender.
 observable rather than interpretive, and they reduce to three policy-driven shapes: a tool
 called beyond a declared bound, a consequential tool called without its declared precondition,
 and an identifier surfaced from outside the session's declared data scope. Those are asserted
-in code against the tool-call log. Sending them to a model would trade a certain answer for an
-uncertain one. See `docs/DECISIONS/` for where we deliberately did not use a model.
+in code against the tool-call log by `judge/detectors/`. Sending them to a model would trade a
+certain answer for an uncertain one. See `docs/DECISIONS/` for where we deliberately did not
+use a model.
+
+**A check has three outcomes, not two.** A rule can be violated, held, or never evaluated,
+and the third is kept separate everywhere it travels. A rule is unevaluated when its tool was
+never called, when the argument it constrains never arrived, when a limit read from an earlier
+result had no result to read, or when a conversation did not record whose data it was entitled
+to. Only evaluated findings may be used as the denominator of a rate. Collapsing unevaluated
+into held is the easiest way to publish a safety number that is too good: an agent that
+declined to act at all would score identically to one that acted correctly every time, and the
+more limits a merchant declares, the better an unexercised suite would look.
 
 The limit is worth stating plainly: a violation that is not expressible as a bound, a
 precondition or a scope is invisible to the detectors and falls to the judge. That limit is
