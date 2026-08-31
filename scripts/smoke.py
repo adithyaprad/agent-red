@@ -9,8 +9,8 @@ that. Cheaper to find out on eight conversations than on four hundred.
 
 Nothing about the attacks is written here. The suite is derived from the target's own spec by
 `build_suite`, exactly as a real run would derive it, and this script only filters that suite
-down to one stake so the run is small. Change `--stake` and a different slice runs; change
-nothing and the machinery is identical to the real thing.
+down to the stakes named so the run is small. Change `--stake` and a different slice runs;
+change nothing and the machinery is identical to the real thing.
 
 Conversations run concurrently because their worlds are isolated: `TargetAgent.session()`
 gives each session id a fresh world, and the driver mints a new id per conversation. The
@@ -19,6 +19,7 @@ the main thread to be written. Persistence was never the slow part.
 
     uv run python scripts/smoke.py --target dispute_handler
         --stake precondition_skipped:issue_refund:verify_identity
+        --stake bound_exceeded:issue_refund:amount:above
 
 Run `--list-stakes` first to see what the target derives.
 """
@@ -68,7 +69,9 @@ the engineering log, which is where the rest of this project's private material 
 """
 
 
-def next_run_dir(target: str, stake: str, label: str = "", root: Path | None = None) -> Path:
+def next_run_dir(
+    target: str, stakes: tuple[str, ...] = (), label: str = "", root: Path | None = None
+) -> Path:
     """Allocate the next numbered directory for a run.
 
     Numbered rather than timestamped, because the question anyone actually asks of a run is
@@ -79,16 +82,24 @@ def next_run_dir(target: str, stake: str, label: str = "", root: Path | None = N
 
     Args:
         target: The registered target name.
-        stake: The stake id the run was filtered to, or empty for the whole suite.
+        stakes: The stake ids the run was filtered to, or empty for the whole suite.
         label: Optional human tag appended to the name.
         root: Where runs live. Defaults to `RUNS_ROOT`.
 
     Returns:
-        The created directory, `NNNN-<target>-<stake>[-<label>]`.
+        The created directory, `NNNN-<target>-<what was attacked>[-<label>]`. One stake is
+        named; several are counted, because five stake ids joined together make a path no
+        one can read and some filesystems will not take. The full list is in `run.json`.
     """
     root = RUNS_ROOT if root is None else root
     root.mkdir(parents=True, exist_ok=True)
-    parts = [f"{_claim_number(root):04d}", target, _slug(stake) or "full-suite"]
+    if not stakes:
+        described = "full-suite"
+    elif len(stakes) == 1:
+        described = _slug(stakes[0])
+    else:
+        described = f"{len(stakes)}-stakes"
+    parts = [f"{_claim_number(root):04d}", target, described]
     if label:
         parts.append(_slug(label))
     directory = root / "-".join(parts)
@@ -213,27 +224,30 @@ class SmokeRun:
     number: str = ""
 
 
-def select(suite: tuple[Attack, ...], stake: str, limit: int) -> tuple[Attack, ...]:
+def select(suite: tuple[Attack, ...], stakes: tuple[str, ...], limit: int) -> tuple[Attack, ...]:
     """Narrow a derived suite to the slice this run should execute.
 
     Args:
         suite: Everything the spec derives.
-        stake: A stake id to keep, or empty to keep all of them.
+        stakes: Stake ids to keep, or empty to keep all of them.
         limit: Maximum attacks to keep after filtering. Zero keeps all.
 
     Returns:
         The attacks to run, in suite sequence.
 
     Raises:
-        SystemExit: If the stake id matches nothing. A typo that silently ran a different
-            slice would produce a report about a question nobody asked.
+        SystemExit: If any stake id matches nothing. Every id is checked, not just the first
+            to fail, and a typo is fatal rather than dropped: a run that quietly covered four
+            of five stakes still divides by a denominator that counts five.
     """
-    chosen = suite if not stake else tuple(a for a in suite if a.stake.id == stake)
-    if not chosen:
-        available = sorted({a.stake.id for a in suite})
+    available = sorted({attack.stake.id for attack in suite})
+    unknown = [stake for stake in stakes if stake not in available]
+    if unknown:
         raise SystemExit(
-            f"no stake {stake!r} on this target. Available:\n  " + "\n  ".join(available)
+            f"no stake {', '.join(repr(stake) for stake in unknown)} on this target. "
+            "Available:\n  " + "\n  ".join(available)
         )
+    chosen = suite if not stakes else tuple(a for a in suite if a.stake.id in stakes)
     return chosen[:limit] if limit else chosen
 
 
@@ -483,7 +497,13 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--target", default="dispute_handler", help="Registered target name.")
-    parser.add_argument("--stake", default="", help="Stake id to run. Empty runs the whole suite.")
+    parser.add_argument(
+        "--stake",
+        action="append",
+        default=[],
+        metavar="STAKE_ID",
+        help="Stake id to run. Repeat for several. Empty runs the whole suite.",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Cap attacks after filtering.")
     parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
@@ -501,19 +521,20 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{stake.id}\n    {stake.consequence} | settled by {stake.settled_by}")
         return
 
-    attacks = select(build_suite(spec), arguments.stake, arguments.limit)
+    stakes = tuple(arguments.stake)
+    attacks = select(build_suite(spec), stakes, arguments.limit)
     if arguments.out is not None:
         out = arguments.out
         out.mkdir(parents=True, exist_ok=True)
     else:
-        out = next_run_dir(arguments.target, arguments.stake, arguments.label)
+        out = next_run_dir(arguments.target, stakes, arguments.label)
 
     print(f"running {len(attacks)} attack(s) against {arguments.target}, writing to {out}")
     run = execute(
         attacks,
         target=arguments.target,
         model=arguments.model,
-        stake=arguments.stake,
+        stake=", ".join(stakes),
         max_turns=arguments.max_turns,
         concurrency=arguments.concurrency,
         recording=out / "calls.jsonl",

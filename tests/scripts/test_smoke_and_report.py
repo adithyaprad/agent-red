@@ -33,26 +33,37 @@ def suite():
 class TestSelection:
     def test_a_stake_selects_every_technique_against_it(self, suite):
         """One stake, the whole corpus. Varying technique is what the run is asking about."""
-        chosen = smoke.select(suite, STAKE, 0)
+        chosen = smoke.select(suite, (STAKE,), 0)
         assert {a.stake.id for a in chosen} == {STAKE}
         assert len({a.technique.id for a in chosen}) == len({a.technique.id for a in suite})
 
     def test_an_empty_stake_keeps_the_whole_suite(self, suite):
-        assert smoke.select(suite, "", 0) == suite
+        assert smoke.select(suite, (), 0) == suite
 
     def test_a_limit_caps_after_filtering(self, suite):
-        chosen = smoke.select(suite, STAKE, 2)
+        chosen = smoke.select(suite, (STAKE,), 2)
         assert len(chosen) == 2
         assert {a.stake.id for a in chosen} == {STAKE}
+
+    def test_several_stakes_all_select(self, suite):
+        wanted = tuple(sorted({a.stake.id for a in suite})[:3])
+        chosen = smoke.select(suite, wanted, 0)
+        assert {a.stake.id for a in chosen} == set(wanted)
+
+    def test_one_bad_stake_among_good_ones_stops_the_run(self, suite):
+        """A run that quietly covered four of five still divides by a denominator of five."""
+        with pytest.raises(SystemExit) as raised:
+            smoke.select(suite, (STAKE, "precondition_skipped:issue_refund:typo"), 0)
+        assert "typo" in str(raised.value)
 
     def test_an_unknown_stake_stops_the_run(self, suite):
         """A typo must not quietly run a different slice than the report will describe."""
         with pytest.raises(SystemExit) as raised:
-            smoke.select(suite, "precondition_skipped:issue_refund:typo", 0)
+            smoke.select(suite, ("precondition_skipped:issue_refund:typo",), 0)
         assert STAKE in str(raised.value)
 
     def test_selection_preserves_suite_sequence(self, suite):
-        chosen = smoke.select(suite, STAKE, 0)
+        chosen = smoke.select(suite, (STAKE,), 0)
         assert list(chosen) == [a for a in suite if a.stake.id == STAKE]
 
 
@@ -287,14 +298,19 @@ class TestRunDirectories:
         assert smoke.next_run_dir("t", "", root=tmp_path).name[:4] == "0003"
 
     def test_the_name_says_what_was_attacked(self, tmp_path):
-        directory = smoke.next_run_dir("dispute_handler", STAKE, root=tmp_path)
+        directory = smoke.next_run_dir("dispute_handler", (STAKE,), root=tmp_path)
         assert directory.name == "0001-dispute_handler-issue-refund-verify-identity"
 
+    def test_several_stakes_are_counted_rather_than_listed(self, tmp_path):
+        """Five ids joined together make a path nobody can read; the list is in run.json."""
+        directory = smoke.next_run_dir("cart_recovery", (STAKE, "a:b", "c:d"), root=tmp_path)
+        assert directory.name == "0001-cart_recovery-3-stakes"
+
     def test_the_whole_suite_is_named_as_such(self, tmp_path):
-        assert smoke.next_run_dir("t", "", root=tmp_path).name.endswith("-full-suite")
+        assert smoke.next_run_dir("t", (), root=tmp_path).name.endswith("-full-suite")
 
     def test_a_label_is_appended(self, tmp_path):
-        directory = smoke.next_run_dir("t", "", label="full 8", root=tmp_path)
+        directory = smoke.next_run_dir("t", (), label="full 8", root=tmp_path)
         assert directory.name.endswith("-full-suite-full-8")
 
     def test_a_readme_beside_the_runs_is_not_counted_as_one(self, tmp_path):
