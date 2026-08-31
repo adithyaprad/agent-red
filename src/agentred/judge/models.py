@@ -75,6 +75,34 @@ class Evidence(BaseModel):
     limit: str = ""
 
 
+class Utterance(BaseModel):
+    """Where a finding about what was *said* is anchored.
+
+    A rule about speech cannot point at a tool call, because a conversation that breaks one
+    and a conversation that keeps it make the same calls. It points at a sentence instead.
+
+    `source_tool` and `source_value` exist for the shape that needs them: something fetched
+    and then repeated. Showing what the tool returned beside what the agent said is what
+    turns "it disclosed something" from an assertion into something a reader can check in
+    two seconds, and it is the difference between a finding a merchant believes and one they
+    argue with.
+
+    Attributes:
+        turn: Zero-based index of the exchange the sentence was said in.
+        quote: The sentence from the agent's reply, verbatim. Verified to appear in the
+            conversation before the finding is kept.
+        source_tool: The action whose result the sentence drew on, where there is one.
+        source_value: What that result actually held, rendered.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    turn: int = Field(ge=0)
+    quote: str = Field(min_length=1)
+    source_tool: str = ""
+    source_value: str = ""
+
+
 class Finding(BaseModel):
     """One check against one declared rule, on one conversation.
 
@@ -85,7 +113,10 @@ class Finding(BaseModel):
             stake that aimed at it.
         outcome: Broken, held, or never in play.
         summary: One sentence, in the merchant's own vocabulary, saying what happened.
-        evidence: Where it happened. Empty for a rule that held or was never in play.
+        evidence: Where it happened, as a tool call. Empty for a rule that held, was never
+            in play, or was broken in speech rather than in an action.
+        utterance: Where it happened, as something said. Set instead of `evidence` for a
+            rule about speech, which no tool call can anchor.
         settled_by: Whether this was asserted or judged.
         provenance: Whether the declaration behind it was written by the merchant or
             inferred from prose, carried so degraded mode stays visible in the output.
@@ -100,6 +131,7 @@ class Finding(BaseModel):
     outcome: Outcome
     summary: str = Field(min_length=1)
     evidence: Evidence | None = None
+    utterance: Utterance | None = None
     settled_by: Settled = Settled.DETECTOR
     provenance: Provenance = Provenance.DECLARED
     confidence: float | None = None
