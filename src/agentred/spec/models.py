@@ -447,6 +447,61 @@ class DataScope(BaseModel):
     description: str = Field(default="")
 
 
+class ObligationKind(StrEnum):
+    """What sort of thing an obligation forbids.
+
+    Three, because three is what the shapes actually are once the domain is removed. All of
+    them constrain what the agent *says*, which is why none of them is a bound or a
+    precondition: no argument is out of range and no step is missing, and the tool-call log
+    of a conversation that breaks one is indistinguishable from a conversation that does not.
+
+    Attributes:
+        DISCLOSURE: Something reached through a tool that must not be repeated to the person
+            on the other side. The record was legitimately fetched; saying it out loud is
+            the failure.
+        ACCURACY: Something the agent must not assert unless a tool returned it. Stating a
+            figure from memory is the failure even when the figure happens to be right.
+        COMMITMENT: Something the agent must not undertake on the merchant's behalf. The
+            merchant is bound by what their agent promised, whether or not any tool recorded
+            it.
+    """
+
+    DISCLOSURE = "disclosure"
+    ACCURACY = "accuracy"
+    COMMITMENT = "commitment"
+
+
+class Obligation(BaseModel):
+    """A rule about what the agent may say, which no tool call can prove was kept.
+
+    Bounds and preconditions are decidable from the tool-call log, which is why they are
+    detectors. An obligation is not: it constrains the text of a reply against what the
+    conversation is entitled to say, so settling one needs a reading. It is declared here
+    anyway, in the same object as the rest of the policy, so that the thing the judge is
+    asked is a rule the merchant recognises rather than a question the judge invented.
+
+    Attributes:
+        name: Stable identifier for this obligation.
+        kind: Which shape of speech it constrains.
+        statement: The rule as written, verbatim where it came from prose. This is what a
+            judge is asked about and what a merchant is shown, so a paraphrase here quietly
+            changes the rule being enforced.
+        applies_to: Tools whose results or effects this obligation governs. Empty means it
+            governs the conversation as a whole.
+        provenance: Declared by the merchant, or inferred from prose.
+        description: What it protects, in the merchant's terms.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    kind: ObligationKind
+    statement: str = Field(min_length=1)
+    applies_to: tuple[str, ...] = ()
+    provenance: Provenance = Provenance.DECLARED
+    description: str = Field(default="")
+
+
 class AgentConfig(BaseModel):
     """What the agent is and can do.
 
@@ -520,6 +575,7 @@ class AgentPolicy(BaseModel):
         version: Version of this policy object. Part of the scorecard validity tuple.
         bounds: Limits on tool arguments.
         preconditions: Tools that must precede consequential tools.
+        obligations: Rules about what may be said, which no tool call can settle.
         data_scope: What one session may reach.
     """
 
@@ -529,18 +585,22 @@ class AgentPolicy(BaseModel):
     version: str = Field(min_length=1)
     bounds: tuple[Bound, ...] = ()
     preconditions: tuple[Precondition, ...] = ()
+    obligations: tuple[Obligation, ...] = ()
     data_scope: DataScope = DataScope()
 
     @model_validator(mode="after")
     def _unique_names(self) -> AgentPolicy:
         _reject_duplicates((bound.name for bound in self.bounds), "bound")
         _reject_duplicates((pre.name for pre in self.preconditions), "precondition")
+        _reject_duplicates((duty.name for duty in self.obligations), "obligation")
         return self
 
     @property
-    def statements(self) -> tuple[NumericBound | EnumeratedBound | Precondition | DataScope, ...]:
+    def statements(
+        self,
+    ) -> tuple[NumericBound | EnumeratedBound | Precondition | Obligation | DataScope, ...]:
         """Every policy statement, of every kind, for provenance reporting."""
-        return (*self.bounds, *self.preconditions, self.data_scope)
+        return (*self.bounds, *self.preconditions, *self.obligations, self.data_scope)
 
     @property
     def is_fully_declared(self) -> bool:
