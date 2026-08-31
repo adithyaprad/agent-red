@@ -13,6 +13,7 @@ import pytest
 
 from agentred.attacks.generator import (
     ATTACK_EFFORT,
+    COMPOSE_ATTEMPTS,
     TURN_SCHEMA,
     AttackError,
     ModelAttacker,
@@ -303,19 +304,69 @@ class TestStopping:
 class TestUnusableReplies:
     def test_an_empty_turn_is_an_error_not_a_skipped_turn(self, suite):
         """A substituted turn produces a transcript that reads like an attempt and was not."""
-        client = RecordedModelClient(replies=[reply("   ")])
+        client = RecordedModelClient(replies=[reply("   ")] * COMPOSE_ATTEMPTS)
         with pytest.raises(AttackError, match="empty"):
             ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
 
     def test_unparseable_json_is_an_error(self, suite):
-        client = RecordedModelClient(replies=["I'm sorry, I can't help with that."])
+        client = RecordedModelClient(replies=["I'm sorry, I can't help."] * COMPOSE_ATTEMPTS)
         with pytest.raises(AttackError, match="not readable"):
             ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
 
     def test_a_non_object_reply_is_an_error(self, suite):
-        client = RecordedModelClient(replies=['["a turn"]'])
+        client = RecordedModelClient(replies=['["a turn"]'] * COMPOSE_ATTEMPTS)
         with pytest.raises(AttackError, match="expected an object"):
             ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
+
+    def test_the_refusal_says_it_was_unreadable_every_time(self, suite):
+        """So a systematic problem reads as one rather than as a single bad reply."""
+        client = RecordedModelClient(replies=['["a turn"]'] * COMPOSE_ATTEMPTS)
+        with pytest.raises(AttackError, match=f"on all {COMPOSE_ATTEMPTS} attempts"):
+            ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
+
+
+class TestAskingAgainForAnUnusableTurn:
+    """Run 0004 lost three conversations in forty to a reply that parsed but held no turn.
+    The call had succeeded, so no transport retry could have helped it."""
+
+    def test_a_second_ask_recovers_the_conversation(self, suite):
+        client = RecordedModelClient(replies=[reply("   "), reply("hello there")])
+        assert ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with()) == (
+            "hello there"
+        )
+        assert len(client.calls) == 2
+
+    def test_unreadable_json_is_asked_for_again_too(self, suite):
+        client = RecordedModelClient(replies=["not json", reply("hello there")])
+        attacker = ModelAttacker(attack=suite[0], client=client)
+        assert attacker.next_turn(transcript_with()) == "hello there"
+
+    def test_the_re_ask_is_the_same_request(self, suite):
+        """A turn composed under instructions no other turn saw was produced by different
+        conditions, and the conversation stops being comparable to the rest of the suite."""
+        client = RecordedModelClient(replies=[reply("   "), reply("hello there")])
+        ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
+        first, second = client.calls
+        assert first.messages == second.messages
+        assert first.system == second.system
+        assert first.output_schema == second.output_schema
+
+    def test_a_usable_reply_costs_exactly_one_call(self, suite):
+        client = RecordedModelClient(replies=[reply("hello there")])
+        ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
+        assert len(client.calls) == 1
+
+    def test_a_decision_to_stop_is_not_retried(self, suite):
+        """Stopping mid-conversation is a real answer, not a failure to give one."""
+        client = RecordedModelClient(replies=[reply("", stop=True, reason="done")])
+        assert ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with()) is None
+        assert len(client.calls) == 1
+
+    def test_the_budget_is_bounded(self, suite):
+        client = RecordedModelClient(replies=[reply("   ")] * (COMPOSE_ATTEMPTS + 5))
+        with pytest.raises(AttackError):
+            ModelAttacker(attack=suite[0], client=client).next_turn(transcript_with())
+        assert len(client.calls) == COMPOSE_ATTEMPTS
 
 
 class TestTheRequestShape:
@@ -361,8 +412,23 @@ class TestSharedOpenings:
 
     def test_stopping_on_an_empty_conversation_is_refused(self, suite):
         """Not a stopping condition being met. A failure to start."""
-        client = RecordedModelClient(replies=[reply("", stop=True, reason="nothing to do")])
+        stopped = reply("", stop=True, reason="nothing to do")
+        client = RecordedModelClient(replies=[stopped] * COMPOSE_ATTEMPTS)
         with pytest.raises(AttackError, match="stopped before anything was said"):
+            compose_opening(suite[0], client)
+
+    def test_an_opening_that_stopped_is_asked_for_again(self, suite):
+        """Unlike a mid-conversation stop, this one is always a failure, so it is worth
+        re-asking rather than losing the whole conversation to it."""
+        client = RecordedModelClient(
+            replies=[reply("", stop=True, reason="nothing to do"), reply("hello there")]
+        )
+        assert compose_opening(suite[0], client) == "hello there"
+
+    def test_the_refusal_still_names_the_attack(self, suite):
+        stopped = reply("", stop=True, reason="nothing to do")
+        client = RecordedModelClient(replies=[stopped] * COMPOSE_ATTEMPTS)
+        with pytest.raises(AttackError, match=suite[0].id):
             compose_opening(suite[0], client)
 
 

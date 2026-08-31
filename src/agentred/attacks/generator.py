@@ -517,6 +517,83 @@ def _parse(text: str) -> tuple[bool, str, str]:
     return stop, turn, reason
 
 
+COMPOSE_ATTEMPTS = 3
+"""How many times a turn is asked for before the conversation is given up on.
+
+Separate from the transport retries in `llm/client.py`, and for a different failure. Those
+send the same request again when the route throttles or falls over, which is a failure to be
+answered at all. This one is a failure to be answered usably: the call succeeded, the model
+replied, and what came back was not a turn. Retrying transport cannot fix that, because
+nothing about the transport went wrong.
+
+Three because the observed rate is low and independent. Run 0004 lost three conversations in
+forty this way, so a second ask recovers most of them and a third covers the rest; a budget
+generous enough to hide a systematic problem would turn a broken prompt into a slow run
+instead of a loud one.
+"""
+
+
+def _compose(
+    client: ModelClient,
+    *,
+    system: str,
+    message: str,
+    require_turn: bool = False,
+    attempts: int = COMPOSE_ATTEMPTS,
+) -> tuple[bool, str, str]:
+    """Ask for one composed turn, asking again when the reply cannot be read.
+
+    The request is repeated verbatim rather than amended with a complaint about the previous
+    reply. A turn composed under instructions no other turn saw is a turn produced by
+    different conditions, and a conversation is only comparable to the rest of the suite if
+    every turn in it was asked for the same way.
+
+    No pause between attempts. This failure is not a rate limit, and the client underneath
+    already backs off for the ones that are.
+
+    Args:
+        client: The model composing the turn.
+        system: The attacker's system prompt.
+        message: The state message describing where the conversation is.
+        require_turn: Whether a decision to stop is itself an unusable reply. True for an
+            opening, where stopping cannot mean a stopping condition was met.
+        attempts: Asks before the failure is allowed through. One disables re-asking.
+
+    Returns:
+        `(stop, turn, reason)`.
+
+    Raises:
+        AttackError: If no attempt produced a readable turn. Still raised rather than
+            substituted: a conversation that failed and a conversation that was resisted must
+            never look the same from outside, and the whole point of the budget is that it
+            ends.
+    """
+    budget = max(1, attempts)
+    last: AttackError | None = None
+    for _ in range(budget):
+        response = client.complete(
+            system=system,
+            messages=[{"role": "user", "content": message}],
+            max_tokens=ATTACK_MAX_TOKENS,
+            effort=ATTACK_EFFORT,
+            output_schema=TURN_SCHEMA,
+        )
+        try:
+            stop, turn, reason = _parse(response.text)
+        except AttackError as error:
+            last = error
+            continue
+        if require_turn and (stop or not turn):
+            last = AttackError(
+                "the opening turn stopped before anything was said. A technique's stopping "
+                "condition cannot have been met on an empty conversation."
+            )
+            continue
+        return stop, turn, reason
+    assert last is not None
+    raise AttackError(f"{last}, on all {budget} attempts")
+
+
 @dataclass
 class ModelAttacker:
     """One attack, composing its turns against what the agent actually said.
@@ -582,19 +659,11 @@ class ModelAttacker:
             self.said += 1
             return self.opening
 
-        response = self.client.complete(
+        stop, turn, reason = _compose(
+            self.client,
             system=self._system,
-            messages=[
-                {
-                    "role": "user",
-                    "content": _state_message(self.attack, transcript, self.said, self.max_turns),
-                }
-            ],
-            max_tokens=ATTACK_MAX_TOKENS,
-            effort=ATTACK_EFFORT,
-            output_schema=TURN_SCHEMA,
+            message=_state_message(self.attack, transcript, self.said, self.max_turns),
         )
-        stop, turn, reason = _parse(response.text)
         if stop:
             self.stopped_because = reason or "the technique's stopping condition was met"
             return None
@@ -622,19 +691,15 @@ def compose_opening(
             condition being met, it is a failure to start.
     """
     empty = Transcript(target="", session="", goal=attack.goal)
-    response = client.complete(
-        system=attacker_system_prompt(attack),
-        messages=[{"role": "user", "content": _state_message(attack, empty, 0, max_turns)}],
-        max_tokens=ATTACK_MAX_TOKENS,
-        effort=ATTACK_EFFORT,
-        output_schema=TURN_SCHEMA,
-    )
-    stop, turn, _ = _parse(response.text)
-    if stop or not turn:
-        raise AttackError(
-            f"{attack.id}: the opening turn stopped before anything was said. A technique's "
-            f"stopping condition cannot have been met on an empty conversation."
+    try:
+        _, turn, _ = _compose(
+            client,
+            system=attacker_system_prompt(attack),
+            message=_state_message(attack, empty, 0, max_turns),
+            require_turn=True,
         )
+    except AttackError as error:
+        raise AttackError(f"{attack.id}: {error}") from error
     return turn
 
 
