@@ -19,6 +19,7 @@ import report  # noqa: E402
 import smoke  # noqa: E402
 
 from agentred.attacks.generator import build_suite  # noqa: E402
+from agentred.runner import suite as suite_engine  # noqa: E402
 from agentred.spec import load_spec_dir  # noqa: E402
 
 SPEC_DIR = ROOT / "src/agentred/targets/specs/dispute_handler"
@@ -331,3 +332,32 @@ class TestRunDirectories:
         smoke.next_run_dir("t", "", root=tmp_path)
         (tmp_path / smoke.COUNTER_FILENAME).write_text("not a number")
         assert smoke.next_run_dir("t", "", root=tmp_path).name.startswith("0002-")
+
+
+class TestWhatARunRecordsAboutItself:
+    """A run's number lives in a directory outside the repository, so the store has to
+    carry it or a transcript cannot be traced back to the run anybody cites."""
+
+    def make(self, number: str = "0007", stake: str = "a:b", model: str = "claude-sonnet-5"):
+        return suite_engine.SuiteRun(
+            target="dispute_handler",
+            model=model,
+            stake=stake,
+            max_turns=6,
+            concurrency=4,
+            number=number,
+        )
+
+    def test_the_note_leads_with_the_run_number(self):
+        assert suite_engine.describe(self.make()).startswith("run 0007,")
+
+    def test_a_run_with_no_number_says_so_rather_than_leaving_a_gap(self):
+        assert suite_engine.describe(self.make(number="")).startswith("unnumbered run,")
+
+    def test_the_stake_and_the_attacker_are_both_recorded(self):
+        note = suite_engine.describe(self.make(stake="bound_exceeded:issue_refund:amount:above"))
+        assert "stake=bound_exceeded:issue_refund:amount:above" in note
+        assert "attacker=claude-sonnet-5" in note
+
+    def test_the_whole_suite_is_named_rather_than_left_empty(self):
+        assert "stake=all" in suite_engine.describe(self.make(stake=""))

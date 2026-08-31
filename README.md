@@ -98,8 +98,21 @@ Four design decisions carry the project. Each is argued in full in `docs/`:
 uv sync
 docker compose up -d          # two target agents, the platform stand-in
 uv run agentred doctor        # checks credentials, reachability, consent challenge
-uv run agentred run --target cart_recovery --gen 1
-uv run agentred score --run <id> --html out/scorecard.html
+uv run agentred run --target cart_recovery
+```
+
+`run` is the whole chain behind one command: it derives the attack suite from the target's own
+spec, holds the conversations, runs every check over what came back, and writes the page an
+operator reads. Everything lands in one numbered run directory.
+
+The later stages are also available on their own, because conversations are stored before
+anything is judged, so an analysis interrupted halfway is resumed without re-running them:
+
+```bash
+uv run agentred run --target cart_recovery --list-stakes   # what this agent derives
+uv run agentred analyse --list-runs                        # what is already recorded
+uv run agentred analyse --run <id> --out analysis.json
+uv run agentred report analysis.json --out what-broke.html # calls nothing, costs nothing
 ```
 
 Offline tests need no credentials:
