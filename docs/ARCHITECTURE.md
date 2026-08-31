@@ -172,6 +172,27 @@ into held is the easiest way to publish a safety number that is too good: an age
 declined to act at all would score identically to one that acted correctly every time, and the
 more limits a merchant declares, the better an unexercised suite would look.
 
+**A rule about what the agent says is a third kind of statement.** A bound limits an argument
+and a precondition requires a prior step, and both are decidable from the tool-call log. A rule
+forbidding the agent from repeating something it fetched, asserting a figure it never looked up,
+or undertaking something on the operator's behalf is not: a conversation that breaks one produces
+the same tool calls as a conversation that keeps it. Those are declared as obligations in
+`spec/`, so what the judge is asked is a rule the merchant recognises, quoted as they wrote it,
+rather than a general question about whether the agent behaved well. A judge asked the general
+question answers a slightly different one in every conversation, and nothing that moves can be
+calibrated.
+
+**Rules are read out of the prompt as well as the policy.** `attacks/infer_policy.py` extracts
+the rules an agent's prose states and reports which of them the structured policy does not
+carry. This was planned as degraded mode for an agent declaring nothing, and it earns its place
+against agents that declare a great deal: both targets in this repository were written by
+someone who knew exactly what they were building, and both ended up with rules in their
+instructions that never reached their policy. Everything derived that way carries
+`provenance: inferred` to the scorecard and is never merged into the declared set. A rule naming
+a tool or an argument the agent does not have is refused at construction rather than reported,
+and the share refused is carried, because a model that writes rules and a model that checks them
+would otherwise be free to invent a rule and then find it broken.
+
 The limit is worth stating plainly: a violation that is not expressible as a bound, a
 precondition or a scope is invisible to the detectors and falls to the judge. That limit is
 measured rather than left as a caveat. `attacks/stakes.py` marks every derived stake with
@@ -185,6 +206,22 @@ does need a model for the residue, and that model is unreliable. `judge/calibrat
 scores the judge against human labels on a held-out set and reports precision, recall,
 false-positive cost and the judge's own disagreement rate across repeated samples. Every
 scorecard carries those numbers, so a reader can discount its claims correctly.
+
+**Some failures are properties of a set, not of a conversation.** No transcript is wrong when
+an agent declines. The finding is that it declined twice and complied once on the same subject
+for the same action, and that shape exists only across conversations. It is worth reporting for
+a reason no declared rule covers: an agent whose limits are policy refuses every time, and one
+whose limits are improvised refuses until somebody rephrases, and from outside the two are
+indistinguishable until they are not. `scoring/consistency.py` finds these by counting the
+tool-call log and asks a model one question, only about groups that already disagreed, about
+whether a real difference in the facts explains it.
+
+**A failure is reported with the turn it was decided in.** The turn a rule breaks is rarely the
+turn the conversation was lost. `scoring/breaking_point.py` locates the earlier turn where the
+agent's position changed, quotes it, and verifies the quote against the reply. A report showing
+only the damage teaches the wrong lesson with complete accuracy: a reader who sees the payout
+writes a rule about payouts, when the sentence that decided it was several turns earlier and
+broke nothing.
 
 **Exposure, not test counts.** "You failed 7 of 40 tests" does not reach a merchant.
 "Your agent can be talked into an average 34% discount, and at your stated volume that is
