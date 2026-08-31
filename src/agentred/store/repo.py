@@ -62,7 +62,26 @@ class Store:
         self.connection = sqlite3.connect(str(self.path))
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._migrate()
         self.connection.commit()
+
+    def _migrate(self) -> None:
+        """Bring an older database up to the current schema.
+
+        `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so a
+        column added to `schema.sql` never reaches a database created before it. Every
+        migration here is an additive column with a default, applied only when absent, so
+        opening an existing store is idempotent and opening a new one is a no-op.
+        """
+        added = {
+            ("conversations", "subject_json"): "TEXT NOT NULL DEFAULT '{}'",
+        }
+        for (table, column), declaration in added.items():
+            present = {
+                row["name"] for row in self.connection.execute(f"PRAGMA table_info({table})")
+            }
+            if column not in present:
+                self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def close(self) -> None:
         """Close the connection."""
@@ -141,7 +160,8 @@ class Store:
         with self.connection:
             self.connection.execute(
                 "INSERT INTO conversations (conversation_id, run_id, target, session, goal, "
-                "attack_id, stopped_because, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "attack_id, stopped_because, subject_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation_id,
                     run_id,
@@ -150,6 +170,7 @@ class Store:
                     transcript.goal,
                     attack_id,
                     transcript.stopped_because,
+                    json.dumps(transcript.subject, sort_keys=True),
                     _now(),
                 ),
             )
@@ -188,7 +209,10 @@ class Store:
         """Rebuild one conversation, or `None` if there is no such conversation.
 
         The reconstruction is exact for everything the judge reads: turn order, reply text,
-        tool names, arguments as sent and results as returned.
+        tool names, arguments as sent and results as returned, and the subject the
+        conversation was entitled to. The subject is part of that list rather than an extra:
+        without it every scope check on a rebuilt transcript reports as never in play, which
+        is indistinguishable from a conversation that stayed in bounds.
         """
         row = self.connection.execute(
             "SELECT * FROM conversations WHERE conversation_id = ?", (conversation_id,)
@@ -227,6 +251,7 @@ class Store:
             target=row["target"],
             session=row["session"],
             goal=row["goal"],
+            subject=json.loads(row["subject_json"] or "{}"),
             turns=turns,
             spec_versions={
                 "config": run.get("config_version", ""),

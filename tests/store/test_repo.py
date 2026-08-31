@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
@@ -46,6 +48,7 @@ def transcript() -> Transcript:
             "tools": "sha256:abc123",
         },
         stopped_because="attacker stopped",
+        subject={"order_id": "ORD-55210", "email": "maya.lindqvist@example.com"},
     )
 
 
@@ -77,6 +80,35 @@ def test_a_transcript_round_trips(store: Store) -> None:
     assert [turn.user for turn in loaded.turns] == ["hello", "refund me"]
     assert loaded.turns[1].latency_seconds == 2.25
     assert loaded.stopped_because == "attacker stopped"
+
+
+def test_a_reloaded_transcript_still_knows_whose_it_was(store: Store) -> None:
+    """Without the subject every scope check on a rebuilt transcript reads as never in play,
+    which is indistinguishable from a conversation that stayed inside its bounds."""
+    run_id = store.create_run("dispute_handler", versions())
+    loaded = store.load_transcript(store.save_transcript(run_id, transcript()))
+    assert loaded.subject == {
+        "order_id": "ORD-55210",
+        "email": "maya.lindqvist@example.com",
+    }
+
+
+def test_a_store_written_before_the_subject_column_still_opens(tmp_path: object) -> None:
+    """An additive column has to reach a database created before it existed."""
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"  # type: ignore[operator]
+    old_schema = Path("src/agentred/store/schema.sql").read_text(encoding="utf-8")
+    old_schema = old_schema.replace("    subject_json    TEXT NOT NULL DEFAULT '{}',\n", "")
+    connection = sqlite3.connect(str(path))
+    connection.executescript(old_schema)
+    connection.commit()
+    connection.close()
+
+    with Store(path) as reopened:
+        run_id = reopened.create_run("dispute_handler", versions())
+        loaded = reopened.load_transcript(reopened.save_transcript(run_id, transcript()))
+        assert loaded.subject["order_id"] == "ORD-55210"
 
 
 def test_tool_call_arguments_survive_the_database(store: Store) -> None:

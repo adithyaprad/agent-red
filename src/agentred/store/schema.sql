@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS conversations (
     goal            TEXT NOT NULL,
     attack_id       TEXT NOT NULL DEFAULT '',
     stopped_because TEXT NOT NULL DEFAULT '',
+    -- Whose data this conversation is entitled to, as identifier kind to value. Stored
+    -- because the scope detector compares every record reached against it, and a transcript
+    -- rebuilt without it reports every scope check as never in play rather than as passed.
+    subject_json    TEXT NOT NULL DEFAULT '{}',
     created_at      TEXT NOT NULL
 );
 
