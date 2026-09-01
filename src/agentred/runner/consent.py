@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,14 @@ REGISTRY_FILENAME = "targets.registry.yaml"
 NONCE_BYTES = 16
 CONSENT_TTL_SECONDS = 900.0
 """How long a token stays valid. Consent is established per run, not once per install."""
+
+RENEWAL_MARGIN_SECONDS = 300.0
+"""How much life a token handed out by a `ConsentLease` is guaranteed to have.
+
+A lease is asked for a token once per conversation and the token is checked before every
+turn inside it, so this has to comfortably exceed the longest a single conversation can
+run. The longest observed across runs 0002 to 0005 is 103 seconds on a six turn budget.
+"""
 
 DEFAULT_CHALLENGE_PATH = "/challenge"
 DEFAULT_CHAT_PATH = "/chat"
@@ -473,3 +482,91 @@ def _verify(target: RegisteredTarget, nonce: str, body: dict[str, Any]) -> None:
             f"{target.mode!r}. Attacks include refunds and discounts, so a target that "
             f"cannot prove it is in {target.mode!r} mode is not attacked."
         )
+
+
+class ConsentLease:
+    """Keeps consent live for as long as a run lasts, by establishing it again.
+
+    A token expires so that a suite cannot trade on an agreement made an hour ago. That is
+    the right rule and it has a failure mode: a suite longer than the window loses its tail
+    to its own safety gate, which is what happened to the last three conversations of run
+    0005 at 911 seconds against a 900 second window. Raising the window would weaken the
+    guarantee to fix a scheduling problem.
+
+    A lease resolves it the other way. It holds the registered name, never a URL, and hands
+    out a token that is guaranteed to have at least `margin` seconds left. When the current
+    one does not, it sends a fresh nonce and requires the target to echo it again, so the
+    agreement covering any given turn is at most `TTL - margin` seconds old. Every echo is
+    recorded in `nonces`, so a transcript can show each separate act of consent rather than
+    implying one long-running one.
+
+    Callers still need a real `ConsentToken` to send a turn, so nothing here widens what can
+    reach a target. The lease only decides when to ask again.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        registry: TargetRegistry | None = None,
+        transport: ChallengeTransport | None = None,
+        margin: float = RENEWAL_MARGIN_SECONDS,
+    ) -> None:
+        """Establish consent once, immediately, and hold it.
+
+        Args:
+            name: A name from the registry.
+            registry: The registry to resolve against. Defaults to `load_registry()`.
+            transport: How to send the challenge. Defaults to HTTP.
+            margin: Seconds of life a handed-out token must have. Must exceed the longest a
+                single conversation can take, since a token is fetched once per conversation
+                and checked before every turn within it.
+
+        Raises:
+            ValueError: If `margin` is not inside the window it is a margin on.
+            ConsentError: If consent cannot be established at all.
+        """
+        if not 0.0 < margin < CONSENT_TTL_SECONDS:
+            raise ValueError(
+                f"margin must be between 0 and the {CONSENT_TTL_SECONDS:.0f}s consent window, "
+                f"got {margin}"
+            )
+        self._name = name
+        self._registry = registry
+        self._transport = transport
+        self._margin = margin
+        self._lock = threading.Lock()
+        self._token = establish_consent(name, registry=registry, transport=transport)
+        self.nonces: list[str] = [self._token.nonce]
+
+    @property
+    def renewals(self) -> int:
+        """How many times consent was established again after the first time."""
+        return len(self.nonces) - 1
+
+    def token(self, now: float | None = None) -> ConsentToken:
+        """Return a token with at least `margin` seconds of life left.
+
+        Called once per conversation rather than once per turn, because each call is a live
+        request to the target and a conversation is short against the window.
+
+        Args:
+            now: Monotonic clock reading. Defaults to `time.monotonic()`.
+
+        Returns:
+            A live token.
+
+        Raises:
+            ChallengeFailedError: If the target stops answering the challenge part way
+                through a run. That is terminal, as it is anywhere else: an agent that has
+                stopped consenting is not attacked for the remainder of the suite.
+        """
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            if now - self._token.granted_at < self._token.ttl_seconds - self._margin:
+                return self._token
+            self._token = establish_consent(
+                self._name, registry=self._registry, transport=self._transport
+            )
+            self.nonces.append(self._token.nonce)
+            return self._token

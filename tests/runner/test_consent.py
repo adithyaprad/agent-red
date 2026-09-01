@@ -10,8 +10,10 @@ import pytest
 
 from agentred.runner.consent import (
     CONSENT_TTL_SECONDS,
+    RENEWAL_MARGIN_SECONDS,
     ChallengeFailedError,
     ConsentError,
+    ConsentLease,
     ConsentToken,
     RegisteredTarget,
     RegistryError,
@@ -242,3 +244,88 @@ def test_an_expired_token_refuses_to_be_used() -> None:
 def test_a_live_token_passes_its_own_check() -> None:
     token = establish_consent("cart_recovery", registry=registry(), transport=EchoingTransport())
     token.require_live()
+
+
+def lease(transport: Any, margin: float = RENEWAL_MARGIN_SECONDS) -> ConsentLease:
+    return ConsentLease("cart_recovery", registry=registry(), transport=transport, margin=margin)
+
+
+def test_a_lease_establishes_consent_when_it_is_created() -> None:
+    transport = EchoingTransport()
+    held = lease(transport)
+    assert len(transport.calls) == 1
+    assert held.nonces == [transport.calls[0][1]]
+    assert held.renewals == 0
+
+
+def test_a_lease_hands_out_the_same_token_while_it_has_life_left() -> None:
+    transport = EchoingTransport()
+    held = lease(transport)
+    first = held.token()
+    second = held.token(now=first.granted_at + 60.0)
+    assert second is first
+    assert len(transport.calls) == 1
+
+
+def test_a_lease_asks_again_before_the_window_closes() -> None:
+    transport = EchoingTransport()
+    held = lease(transport)
+    first = held.token()
+    at = first.granted_at + CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS
+    second = held.token(now=at)
+    assert second is not first
+    assert second.nonce != first.nonce
+    assert len(transport.calls) == 2
+    assert held.renewals == 1
+
+
+def test_a_renewed_token_is_live_rather_than_expired() -> None:
+    """The defect this exists to close: run 0005 lost three conversations at 911s.
+
+    A suite longer than the window used to be refused by its own gate. It renews now, and
+    the token handed out after the window has passed is one a turn can be sent with.
+    """
+    transport = EchoingTransport()
+    held = lease(transport)
+    token = held.token(now=held.token().granted_at + CONSENT_TTL_SECONDS + 11.0)
+    token.require_live()
+    assert held.renewals == 1
+
+
+def test_every_act_of_consent_is_recorded_separately() -> None:
+    transport = EchoingTransport()
+    held = lease(transport)
+    start = held.token().granted_at
+    for step in range(1, 4):
+        held.token(now=start + step * (CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS))
+    assert len(held.nonces) == 4
+    assert len(set(held.nonces)) == 4
+
+
+def test_a_lease_refuses_a_target_that_stops_consenting_part_way_through() -> None:
+    transport = EchoingTransport()
+    held = lease(transport)
+    at = held.token().granted_at + CONSENT_TTL_SECONDS
+    transport.overrides = {"mode": "live"}
+    with pytest.raises(ChallengeFailedError):
+        held.token(now=at)
+
+
+def test_a_lease_cannot_be_created_for_an_unregistered_target() -> None:
+    with pytest.raises(TargetNotRegisteredError):
+        ConsentLease("not_registered", registry=registry(), transport=EchoingTransport())
+
+
+@pytest.mark.parametrize("margin", [0.0, -1.0, CONSENT_TTL_SECONDS, CONSENT_TTL_SECONDS + 1])
+def test_a_margin_outside_the_window_is_refused(margin: float) -> None:
+    with pytest.raises(ValueError, match="margin"):
+        lease(EchoingTransport(), margin=margin)
+
+
+def test_the_margin_exceeds_the_longest_conversation_observed() -> None:
+    """A token is fetched per conversation and checked per turn inside it.
+
+    So the margin has to outlast a whole conversation, or a long one expires mid-flight
+    holding a token the lease thought was safe to hand out.
+    """
+    assert RENEWAL_MARGIN_SECONDS > 103.0
