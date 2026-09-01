@@ -43,6 +43,7 @@ from agentred.runner.suite import (
     DEFAULT_ATTACKER_MODEL,
     DEFAULT_CONCURRENCY,
     DEFAULT_MAX_TURNS,
+    SuiteRun,
     execute,
     next_run_dir,
     persist,
@@ -261,19 +262,41 @@ def run(
         directory = next_run_dir(target, stakes, label)
 
     typer.echo(f"running {len(attacks)} attack(s) against {target}, writing to {directory}")
-    completed = execute(
-        attacks,
-        target=target,
-        model=model,
-        stake=", ".join(stakes),
-        max_turns=max_turns,
-        concurrency=concurrency,
-        recording=directory / "calls.jsonl",
-    )
-    completed.number = directory.name[:4] if directory.name[:4].isdigit() else ""
+    interrupted: BaseException | None = None
+    try:
+        completed = execute(
+            attacks,
+            target=target,
+            model=model,
+            stake=", ".join(stakes),
+            max_turns=max_turns,
+            concurrency=concurrency,
+            recording=directory / "calls.jsonl",
+            store_path=store_path,
+            number=directory.name[:4] if directory.name[:4].isdigit() else "",
+        )
+    except KeyboardInterrupt as stop:
+        # Whatever finished is already in the store, transcript by transcript. Rebuild a run
+        # around it so the directory describes what happened rather than nothing, then stop.
+        # A suite is hours long and the alternative is losing every completed conversation to
+        # one interruption, which is how run 0006 was lost.
+        completed = stop.args[0] if stop.args and isinstance(stop.args[0], SuiteRun) else None
+        if completed is None:
+            raise
+        interrupted = stop
+
     persist(completed, store_path)
     (directory / "run.json").write_text(json.dumps(to_json(completed), indent=2), encoding="utf-8")
     typer.echo(summarise(completed))
+    if interrupted is not None:
+        typer.echo("")
+        typer.echo(
+            f"INTERRUPTED. {len(completed.outcomes)} of {len(attacks)} conversation(s) are "
+            f"recorded and analysable; the rest were never run."
+        )
+        typer.echo(f"run.json     {directory / 'run.json'}")
+        typer.echo(f"store run id {completed.run_id}")
+        raise typer.Exit(code=130)
 
     if conversations_only or not completed.run_id:
         typer.echo(f"run.json     {directory / 'run.json'}")

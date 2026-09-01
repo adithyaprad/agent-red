@@ -19,7 +19,7 @@ the main thread to be written. Persistence was never the slow part.
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,7 @@ from agentred.judge.models import Finding
 from agentred.judge.models import Outcome as JudgeOutcome
 from agentred.llm.client import AnthropicModelClient
 from agentred.llm.recording import CallRecorder, RecordingModelClient
-from agentred.runner.consent import ConsentToken, establish_consent, load_registry
+from agentred.runner.consent import ConsentLease, load_registry
 from agentred.runner.conversation import Transcript, run_conversation
 from agentred.spec import load_spec_dir
 from agentred.store.repo import Store
@@ -197,6 +197,8 @@ class SuiteRun:
         run_id: The store's id for this run.
         number: The run's sequence number, taken from its directory name, so the report can
             title itself the same way the directory listing does.
+        consents: How many separate times the target echoed a challenge during this run. One
+            for a short suite, more for a suite that outlasted the consent window.
     """
 
     target: str
@@ -210,6 +212,7 @@ class SuiteRun:
     recording: Path | None = None
     run_id: str = ""
     number: str = ""
+    consents: int = 1
 
 
 def select(suite: tuple[Attack, ...], stakes: tuple[str, ...], limit: int) -> tuple[Attack, ...]:
@@ -239,7 +242,7 @@ def select(suite: tuple[Attack, ...], stakes: tuple[str, ...], limit: int) -> tu
     return chosen[:limit] if limit else chosen
 
 
-def run_one(attack: Attack, attacker: Any, token: ConsentToken, max_turns: int) -> Outcome:
+def run_one(attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int) -> Outcome:
     """Execute one conversation, capturing a failure rather than propagating it.
 
     One attack failing must not end the run: the others are independent, and the failure is
@@ -252,7 +255,8 @@ def run_one(attack: Attack, attacker: Any, token: ConsentToken, max_turns: int) 
     Args:
         attack: What is being run, carried onto the outcome.
         attacker: The composed attacker for it.
-        token: Proof the target consented.
+        lease: Asked for a token as this conversation starts, so a suite longer than the
+            consent window renews rather than being refused by its own gate.
         max_turns: Per-conversation budget.
 
     Returns:
@@ -261,6 +265,7 @@ def run_one(attack: Attack, attacker: Any, token: ConsentToken, max_turns: int) 
     started = time.monotonic()
     subject = dict(attack.subject.identifiers) if attack.subject is not None else None
     try:
+        token = lease.token()
         transcript = run_conversation(token, attacker, max_turns=max_turns, subject=subject)
     except Exception as error:
         return Outcome(
@@ -282,11 +287,15 @@ def execute(
     max_turns: int,
     concurrency: int,
     recording: Path,
+    store_path: Path | None = None,
+    number: str = "",
 ) -> SuiteRun:
     """Run every attack, concurrently, and grade each transcript.
 
-    Consent is established once and the token shared: it is frozen, and `require_live()`
-    only reads a clock, so every worker re-checks the same expiry independently.
+    Consent is held as a lease rather than a single token. Each conversation asks for one
+    as it starts, and the lease establishes consent again when what it holds is close to
+    expiring, so a suite that outlasts the consent window keeps consenting instead of
+    losing its tail to its own gate. How many times that happened is reported.
 
     Detectors run on the main thread after the pool drains. They are pure and would be safe
     concurrently, but running them here keeps the concurrent section to the part that is
@@ -300,12 +309,17 @@ def execute(
         max_turns: Per-conversation budget.
         concurrency: Conversations in flight at once.
         recording: Where every model call is written.
+        store_path: Where to persist each transcript as it lands. Omit to persist nothing,
+            which is what the offline tests do.
+        number: The run's sequence number, needed before the first write because the note
+            stored beside the transcripts cites it.
 
     Returns:
-        The completed run, ready to report on.
+        The run. Complete if it was allowed to finish, and holding whatever completed if it
+        was not.
     """
     spec = load_spec_dir(load_registry().resolve(target).spec_dir)
-    token = establish_consent(target)
+    lease = ConsentLease(target)
     inner = AnthropicModelClient(model=model)
     recorder = CallRecorder(recording, label=target)
 
@@ -319,6 +333,7 @@ def execute(
         recording=recording,
     )
     started = time.monotonic()
+    order = {attack.id: index for index, attack in enumerate(attacks)}
 
     attackers = [
         build_attackers(
@@ -329,18 +344,43 @@ def execute(
         for attack in attacks
     ]
 
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [
-            pool.submit(run_one, attack, attacker, token, max_turns)
-            for attack, attacker in zip(attacks, attackers, strict=True)
-        ]
-        run.outcomes = [future.result() for future in futures]
+    run.number = number
+    store = Store(store_path) if store_path is not None else None
+    if store is not None:
+        run.run_id = store.create_run(run.target, spec.version_tuple, notes=describe(run))
 
-    run.seconds = round(time.monotonic() - started, 2)
+    def settle() -> None:
+        """Put the run in a reportable state, whether or not every attack ran."""
+        run.outcomes.sort(key=lambda o: order.get(o.attack.id, 0))
+        run.seconds = round(time.monotonic() - started, 2)
+        run.consents = len(lease.nonces)
+        for outcome in run.outcomes:
+            if outcome.transcript is not None:
+                outcome.findings = run_detectors(spec, outcome.transcript)
 
-    for outcome in run.outcomes:
-        if outcome.transcript is not None:
-            outcome.findings = run_detectors(spec, outcome.transcript)
+    try:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {
+                pool.submit(run_one, attack, attacker, lease, max_turns): attack
+                for attack, attacker in zip(attacks, attackers, strict=True)
+            }
+            for future in as_completed(futures):
+                outcome = future.result()
+                run.outcomes.append(outcome)
+                if store is not None and outcome.transcript is not None:
+                    store.save_transcript(
+                        run.run_id, outcome.transcript, attack_id=outcome.attack.id
+                    )
+    except KeyboardInterrupt as stop:
+        settle()
+        raise KeyboardInterrupt(run) from stop
+    finally:
+        if store is not None:
+            if run.run_id:
+                store.finish_run(run.run_id)
+            store.close()
+
+    settle()
     return run
 
 
@@ -366,6 +406,9 @@ def describe(run: SuiteRun) -> str:
 def persist(run: SuiteRun, store_path: Path) -> None:
     """Write every completed transcript to SQLite, from this thread only.
 
+    A no-op when `execute` already persisted as it went, which is the normal path. It stays
+    here for callers that assembled a run some other way.
+
     `Store` holds one connection with `check_same_thread` on, so writing from the workers
     would raise. Nothing is lost by waiting: the writes are microseconds next to the model
     calls that produced them.
@@ -374,6 +417,8 @@ def persist(run: SuiteRun, store_path: Path) -> None:
         run: The completed run. Its `run_id` is filled in.
         store_path: Where the database lives.
     """
+    if run.run_id:
+        return
     completed = [o for o in run.outcomes if o.transcript is not None]
     if not completed:
         return
@@ -413,6 +458,7 @@ def to_json(run: SuiteRun) -> dict[str, Any]:
         "seconds": run.seconds,
         "run_id": run.run_id,
         "number": run.number,
+        "consents": run.consents,
         "recording": str(run.recording) if run.recording else "",
         "outcomes": [
             {
@@ -472,6 +518,7 @@ def summarise(run: SuiteRun) -> str:
         f"stake       {run.stake or 'all'}",
         f"ran         {len(run.outcomes)} conversation(s), {run.concurrency} at a time, "
         f"{run.seconds}s wall clock",
+        f"consent     echoed {run.consents} time(s) during the run",
         "",
     ]
     for outcome in run.outcomes:
