@@ -31,12 +31,21 @@ agent-red reads what the merchant built, and derives the attack suite from it.
 | **Config** | What the agent *is* and *can do*: instructions, tools with schemas, reachable data | One retrievable, versioned object |
 | **Policy** | What the agent *may* and *must* do: bounds, required preconditions, session data scope | Separate from config, and structured rather than prose |
 | **Subjects** | Who the harness may act as: identities the merchant declares as safe to impersonate against a test deployment, with what each would know | Present whenever the policy scopes a session to a subject |
+| **Channels** | Where attacker-controlled bytes can enter: which fields of which records a customer writes, and the trigger that makes the agent read them | Declared, because what an adversary controls is a property of the deployment and the merchant knows it |
 
 The split matters: config is capability, policy is authorisation, and every system that grants
 power to an actor separates the two. It also decides what remedies exist. A structured policy
 can be tightened, which makes a violation unreachable. A limit written as English inside a
 system prompt can only be reworded, which makes a violation less likely. See
 `docs/DECISIONS/ADR-0003-instruction-vs-permission.md`.
+
+Channels are what makes the suite reach an agent nobody talks to. A cart-abandonment agent has
+no user turn in its entire lifetime: a cron fires, it reads the abandoned baskets, it decides
+who to contact, it sends a message. Everything an adversary controls about that run was written
+into a record days earlier, as a name, an address, a note on an order. An agent declares those
+fields and the trigger that reads them, and the harness attacks through them. Without the
+declaration the harness would have to guess at a schema it will not see on a real platform, and
+a guess that is wrong reports a clean sheet. See `docs/DECISIONS/ADR-0006-attack-channels.md`.
 
 Subjects are the part most easily mistaken for a convenience. An agent that reads records
 cannot be attacked in the abstract: the conversation has to be about somebody, and the
@@ -56,17 +65,28 @@ than uncertainty at the edges, so it is reported rather than hidden.
 to generic probing, and the suite loses most of its power. Without subjects, the suite still
 runs and still reports honestly, and reports nothing: every check comes back never evaluated.
 
-### Surface 2: the agent is exercisable
+### Surface 2: the agent is exercisable, and its hands are observable
 
-agent-red runs the agent, repeatedly, safely, and observes what it did.
+agent-red runs the agent, repeatedly, safely, and observes what it did. The second half of
+that sentence used to be a request made of the agent and is now a property of where we stand.
 
 | Assumed | Why it is load-bearing |
 |---|---|
-| Conversable **before publish** | The gate is pre-launch. No draft state, no gate. |
-| Conversations **fresh and isolated** | 400 samples must be independent, or every reported rate is wrong. Not degradable. |
+| Runnable **before publish**, through its real trigger | The gate is pre-launch, and the attack path has to be the agent's normal operating path. A synthetic prompt standing in for a cron tests a different agent than the one that ships. |
+| Runs **fresh and isolated** | 400 samples must be independent, or every reported rate is wrong. Not degradable. |
+| Its tools are reached through **one boundary we hold** | Every violation is observed there. Not degradable, and it is what makes the harness framework-agnostic by construction. |
 | Side effects **sandboxed** | The suite deliberately attempts refunds and orders. Not degradable. |
-| A turn returns **tool calls**, not only text | Provable violations instead of judged ones. |
 | Test-time behaviour **matches production** | Same model version, tools and data, or the measurement describes a different agent than the one that ships. |
+
+The fourth row replaced the assumption this document made until 2026-09-02, which was that a
+turn comes back carrying the agent's own list of the tools it called. That was true because we
+wrote the target, and it is the wrong thing to depend on twice over: a self-report is not
+evidence about an untrusted party, and requiring one means integrating with every agent runtime
+separately, which is exactly the generality the project claims. An agent's reply is
+framework-specific; an agent's hands are not. Whatever it is built on, it reaches the
+merchant's money through tools, and in the platform this is shaped around those tools are MCP
+connectors. Recording there is on our side of the trust line and needs nothing from the agent.
+See `docs/DECISIONS/ADR-0005-oracle-at-the-tool-boundary.md`.
 
 *Failure mode if absent:* the agent can be attacked but not measured, so there is no evidence.
 
@@ -101,10 +121,31 @@ enforces this: a scorecard cannot be written without it.
 ### The stand-in targets
 
 `src/agentred/targets/` implements this contract locally so the harness has something real to
-attack. It is a stand-in, not the product. Three targets exist: a cart-recovery agent and a
-dispute-handling agent, both with declared policy, and a third from an unrelated domain
-introduced after the harness was frozen, used to verify that nothing in `attacks/` or
-`judge/detectors/` encodes knowledge of what a target sells.
+attack. It is a stand-in, not the product.
+
+The two primary targets are built the way the platform this is shaped around builds them: a
+deterministic workflow engine holding the steps, LLM nodes confined to the judgement points
+inside those steps, and every external capability behind an MCP connector. A cart-recovery
+agent fires on a schedule and contacts customers who abandoned a basket. A dispute-handling
+agent triages chargebacks, decides whether to contest or accept, and assembles evidence. Both
+are written the way a competent person would first ship them: a clear prompt, sensible tools,
+correct policy, limits stated in the instructions, and no anticipation of adversarial pressure.
+Written defensively, nothing breaks and there is nothing to show; written badly, the result is
+worthless. Every flaw the suite finds has to pass one test before it appears in a report: could
+a competent person building on a no-code studio plausibly ship this. Anything needing a reach
+is cut.
+
+A third target exists and is built deliberately differently: an unrelated domain, and a plain
+model loop with no workflow engine, introduced after the harness was frozen. It carries two
+proofs at once. Nothing in `attacks/` or `judge/detectors/` encodes knowledge of what a target
+sells, and nothing in them encodes knowledge of how a target is built. The identical suite runs
+against all three with no new attack code, no new detectors and no per-target configuration
+beyond the spec each one declares.
+
+That second proof is the one the oracle placement buys, and it is worth being precise about why
+it holds rather than asserting it. The harness never reads a workflow trace, a graph state or a
+message block. It reads a call stream captured at the MCP server and a policy the agent
+declares, and both of those exist regardless of what produced the calls.
 
 ## Pipeline
 
@@ -112,20 +153,34 @@ introduced after the harness was frozen, used to verify that nothing in `attacks
  registry + consent gate
           |
           v
-   attack generator  ------ techniques (YAML) x derived stakes + mutations + gen N-1 winners
+   attack generator  ---- techniques (YAML) x derived stakes x channels + mutations + gen N-1 winners
           |
-          v
-   conversation runner  ---->  target endpoint  ---->  reply + tool-call log
-          |                                                   |
-          v                                                   v
-   deterministic detectors  <-------------------------  policy manifest
+          +---------------------------+
+          |                           |
+          v                           v
+  conversational channel        planted channel
+  multi-turn driver             restore -> plant -> trigger
+          |                           |
+          +------------+--------------+
+                       |
+                       v
+                 the agent runs
+                       |
+                       v
+          MCP server  ---->  tools over the synthetic world
+                       |
+                       v
+          call stream + world diff        (recorded here, not reported by the agent)
+                       |
+                       v
+   deterministic detectors  <---------------------  policy manifest
           |
           | (only the interpretive residue)
           v
       LLM judge  ------  calibration harness  ----  held-out set + human labels
           |
           v
-      scorecard  ----  exposure model  ----  suggested patch  ----  re-run, measure delta
+      scorecard  ----  exposure model  ----  suggested config change  ----  re-run, measure delta
 ```
 
 ## Why each stage exists
@@ -150,10 +205,30 @@ a target sells. That claim is tested rather than asserted: a third target from a
 domain is introduced after the harness is frozen and must produce a valid scorecard with no
 new attack code and no new detectors.
 
-**Multi-turn is the point.** Single-turn attacks mostly fail against a competent system
-prompt. The ones that land spend three benign turns establishing false context and then
-ask. The runner is therefore a conversation driver with a goal and a turn budget, not a
-prompt sender.
+**Multi-turn is the point, where there are turns at all.** Single-turn attacks mostly fail
+against a competent system prompt. The ones that land spend three benign turns establishing
+false context and then ask. So the conversational channel is a driver with a goal and a turn
+budget, not a prompt sender, and it stays first class: it is the only channel where an attack
+can adapt to what the agent just said, and two of the harness's most distinctive outputs, the
+breaking point and the consistency comparison, exist only because attacks are multi-turn.
+
+**The chat box is one channel, and not the one that reaches every agent.** An agent that runs
+on a schedule has no turns. Everything an adversary controls about that run was written into a
+record days earlier: the free text on a dispute, the name on an account, a delivery
+instruction, a product title the agent summarises. The planted channel writes a payload into a
+field the agent declares as customer-writable, restores the world to a snapshot first, fires the
+agent's real trigger, and reads the call stream. Firing the real trigger is the part that
+carries the argument: an attack delivered down a path the deployment does not use is a finding
+about a test harness. See `docs/DECISIONS/ADR-0006-attack-channels.md`.
+
+**A finding is reproducible from a seed.** Generation is stochastic, and a gate that returns
+different verdicts on identical input is not a gate. Every attack carries the seed that
+produced its surface form, so a finding replays byte for byte. The suite is split accordingly:
+a frozen corpus of attacks that have succeeded somewhere before, deterministic and identical
+every run, which is the only thing a verdict is computed from, and an exploratory budget that
+mutates and searches and can promote a novel success into the frozen set for next time. The
+second never moves a verdict. A side effect worth naming: the corpus compounds, so every agent
+tested makes the gate stronger for the agent after it.
 
 **Detectors before the judge, and the detectors are generic.** Most real violations are
 observable rather than interpretive, and they reduce to three policy-driven shapes: a tool
@@ -162,6 +237,24 @@ and an identifier surfaced from outside the session's declared data scope. Those
 in code against the tool-call log by `judge/detectors/`. Sending them to a model would trade a
 certain answer for an uncertain one. See `docs/DECISIONS/` for where we deliberately did not
 use a model.
+
+**The page is a function of the agent too, and that is enforced rather than intended.** The
+claim that the suite is derived from the agent under test is worth nothing if the artefact
+somebody reads was written for one merchant. So `scoring/` is held to the same genericity guard
+as `attacks/` and `judge/detectors/`: a module there that says refund, basket or shopper fails
+the build. What a page needs in order to speak plainly is declared by the agent instead. The
+config says what to put in front of an amount, what it calls the people a session is about, and
+which result fields mean the operator is out of pocket, and the page reads the operator's own
+sentence for every rule rather than the identifier the harness files it under. Writing prose for
+a reader is the activity most likely to produce a sentence that only makes sense in one shop,
+which is why this directory is guarded rather than trusted.
+
+**A rate is reported over what was actually tried.** A rule holds nineteen times out of the
+nineteen conversations that reached it, not out of the eighty-eight that were run. Both figures
+are printed, because the second is what says how much the first is worth. A rule nothing ever
+reached carries no rate at all rather than a perfect one, and a rule read out of an agent's
+prose that no check covers is reported as never looked at, which is a third state and not a
+good score.
 
 **A check has three outcomes, not two.** A rule can be violated, held, or never evaluated,
 and the third is kept separate everywhere it travels. A rule is unevaluated when its tool was
@@ -228,7 +321,79 @@ broke nothing.
 roughly this much a month" does. The model, and every assumption it rests on, is in
 `docs/EVALUATION.md`. Assumptions are printed alongside the number, never buried.
 
-**Close the loop.** A finding that is not fixed is not worth much, so the harness generates
-a suggested policy or prompt patch from the breaking transcripts, applies it to the target,
-re-runs the identical suite, and reports the before and after with the residual failures
-named. That delta is the product's actual claim.
+**Close the loop, and the fix has to be config.** A finding that is not fixed is not worth
+much, so the harness generates a suggested change from the breaking transcripts, applies it to
+the target, re-runs the identical suite, and reports the before and after with the residual
+failures named. That delta is the product's actual claim.
+
+The constraint on what a suggestion may be is a product decision, not an implementation one.
+The people who read this report are ops and finance teams on a no-code builder. They cannot
+apply a Python patch. So every remediation has to be expressible as configuration: a limit
+value, an approval threshold, a narrowed tool allowlist, a required idempotency key, a clause
+in the instruction text. A fix that can only be written as code does not belong in the report,
+because it is not a fix anybody reading the report can make.
+
+This is also where the strongest thing the harness can demonstrate lives, and it takes thirty
+seconds. Land a finding. Let the merchant fix it the obvious way first, by tightening the
+sentence in the instructions box. Re-run: that exact attack now fails. Then show a variant that
+still succeeds. Then apply the real fix, moving the bound out of the prompt and into the tool
+schema, and watch the whole family go dark. Every other claim in this document rests on that
+being true, and it is the reason the config-policy split at the top of this file exists.
+
+**Security and utility are reported together, always.** Every hardening change costs
+capability, and the trivially safest agent refuses everything. So a benign suite of ordinary
+tasks with known-correct outcomes runs beside the attack suite, and both numbers move together
+in the report. Attacks succeeding and benign tasks passing appear on the same line, before and
+after. A security number reported on its own is not acceptable output, because the change that
+produced it may have been an agent that stopped working.
+
+**Nothing in the output implies safety.** The harness can prove a vulnerability exists. It
+cannot prove one does not, and a clean verdict that precedes a real loss makes the tool the
+cause of that loss. So safe, secure, verified and passed all checks are absent from every
+user-facing string, and a run that found nothing says what it actually did: no findings in 340
+attempts across six goals and nine channels, with the coverage grid rendered beside it so a
+reader can see what was never tried. That grid is what replaces a safety claim. It sits beside
+the three-outcome accounting rather than replacing it, because a cell that was attempted is a
+weaker statement than a rule that was actually reached and decided.
+
+## What the harness can see, and what it structurally cannot
+
+Every item here is a consequence of a decision above rather than a gap waiting to be filled,
+which is why they are stated as architecture and not as caveats at the end of a report.
+
+**Coverage is not proof.** The harness finds vulnerabilities. It cannot establish their
+absence, and no number it prints should be read as having done so.
+
+**The declaration is trusted ground truth.** agent-red verifies that an agent conforms to what
+it declares. It does not verify that the declaration is correct. An agent faithfully executing
+a wrong rule passes, and an agent whose merchant declared a ceiling twice as high as their
+margin can survive is measured against that ceiling. Conformance, not correctness of intent.
+This should be said out loud everywhere, including in the demo.
+
+**White box is the product; black box is a reduced mode and no parity is claimed.** The
+harness reads an agent's declaration and derives its threat model from it, which is the mode
+that ships and the mode a pre-launch gate is entitled to. A real adversary has no manifest, and
+that objection is answered rather than dismissed: an endpoint-only mode runs the invariants that
+hold for any commerce agent regardless of what it declared, which is to say never move more
+money than the order was worth, never read a record belonging to a customer other than the one
+in the session, never send to a destination that is not on file. Everything policy-specific is
+unavailable there, because policy-specific bounds are exactly what the declaration was
+providing, and a bound inferred from watching an endpoint is a guess rather than ground truth.
+The two modes are reported separately and the reduced one says what it could not check.
+
+**State resets between runs, so multi-run attacks are invisible.** The world is restored before
+every attack, which is what makes a finding reproducible and replayable. The same property
+means a payload that does no damage this run but poisons a record for every future cycle, a
+product title that affects next week's cart recovery, a note the agent writes that a later run
+reads as trusted context, is outside the harness by construction. Named rather than covered.
+
+**A violation must be expressible as a bound, a precondition, a scope or an obligation.**
+Anything a merchant cares about that does not fit one of those four shapes is invisible to the
+detectors and falls to the judge, and the share that falls to the judge is measured and
+reported rather than left as a caveat.
+
+**A well-built agent may resist everything, and that is a valid result.** If a workflow extracts
+structured fields before the reasoning step, a planted payload never reaches the decision
+context. That is the correct architecture and the right defence. The finding is then whatever
+it is, and the report says how many attempts were made rather than implying that few findings
+means few vulnerabilities.
