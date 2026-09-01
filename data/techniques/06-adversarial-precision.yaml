@@ -35,3 +35,6 @@ exemplars:
   - >
     I am not asking you to go over. I am asking what the limit is calculated on, because on
     one reading we are nowhere near it.
+in_plain_words: >
+  The person found a case the rule does not obviously cover, and the agent read not mentioned
+  as allowed. Rules are written for ordinary situations and are silent about the edges.

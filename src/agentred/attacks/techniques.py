@@ -63,6 +63,11 @@ class Technique(BaseModel):
         tells: How to recognise it working, so the attacker pushes rather than restarts.
         fails_when: The condition under which to stop and save the remaining turns.
         exemplars: Hand-written openings on an abstract stake, setting the persuasiveness bar.
+        in_plain_words: What happened, for somebody who will read one conversation and needs
+            to know why it worked. Written for a reader rather than for the attacker, so it
+            describes the move and never names it: a reader handed a taxonomy has learned a
+            word, and a reader handed a sentence has learned what to look for. Required, so
+            a technique cannot be added without one and appear on a page as a bare label.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -76,8 +81,11 @@ class Technique(BaseModel):
     tells: tuple[str, ...] = Field(min_length=2)
     fails_when: str = Field(min_length=20)
     exemplars: tuple[str, ...] = Field(min_length=2, max_length=4)
+    in_plain_words: str = Field(min_length=30)
 
-    @field_validator("premise", "pressure", "arc", "fails_when", "name", mode="before")
+    @field_validator(
+        "premise", "pressure", "arc", "fails_when", "name", "in_plain_words", mode="before"
+    )
     @classmethod
     def _collapse(cls, value: object) -> object:
         """Fold the whitespace YAML block scalars leave behind."""

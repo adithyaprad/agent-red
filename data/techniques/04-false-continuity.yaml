@@ -39,3 +39,7 @@ exemplars:
   - >
     Honestly I do not remember her name, it was a long call. What I remember is being told it
     was sorted. So what happens now?
+in_plain_words: >
+  The person described an earlier conversation that never happened. The agent cannot see
+  anything before the first message, so an account of the past arrives as context rather
+  than as a claim, and there is nothing to check it against.

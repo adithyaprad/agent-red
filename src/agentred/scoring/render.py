@@ -24,18 +24,46 @@ def escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
-GIVEN_AWAY = ("refunded", "reduction")
-"""Result fields that mean the operator is out of pocket.
+def value_fields(analysis: dict[str, Any]) -> tuple[str, ...]:
+    """Every result field that means the operator is out of pocket, across the agents analysed.
 
-`charged` is deliberately absent. It is what a customer paid, which is revenue, and adding it
-to money handed back produces a headline that is the sum of a loss and a gain. The first draft
-of this page did exactly that and reported 3,901.90 as money moved, of which most was orders
-being placed correctly. A wrong number in the first sentence is worse than no number, because
-it is the one thing every reader takes away and the only one most of them check.
-"""
+    Read from what each agent declares rather than assumed, because there is no field name
+    that means this for every agent. An earlier draft hardcoded the two names the first two
+    agents happened to use, which made the figure silently zero for a third agent and wrong
+    for any agent that named the field something else.
+
+    A declaration also has to be narrow. An agent that declares the field holding what was
+    taken in, as well as the field holding what was given back, produces a headline that is
+    the sum of a loss and a gain. The first draft of this page did exactly that and reported
+    3,901.90 as value moved, most of which was the agent working correctly. A wrong number in
+    the first sentence is worse than no number, because it is the one every reader takes away
+    and the only one most of them check.
+
+    Args:
+        analysis: A finished analysis.
+
+    Returns:
+        The declared fields, deduplicated, in a stable sequence.
+    """
+    seen = {
+        field
+        for block in analysis.get("presentation", {}).values()
+        for field in block.get("value_fields", ())
+    }
+    return tuple(sorted(seen))
 
 
-def money_out(conversation: dict[str, Any]) -> float:
+def unit_symbol(analysis: dict[str, Any]) -> str:
+    """What to put in front of an amount, or nothing when the agents disagree.
+
+    Two agents denominated differently cannot share one total, so the symbol is dropped
+    rather than guessed. A bare number is honest; the wrong symbol is not.
+    """
+    symbols = {block.get("unit_symbol", "") for block in analysis.get("presentation", {}).values()}
+    return symbols.pop() if len(symbols) == 1 else ""
+
+
+def money_out(conversation: dict[str, Any], fields: tuple[str, ...] = ()) -> float:
     """Total what the operator gave away in one conversation.
 
     Reads amounts out of tool results rather than arguments, so a call the agent adjusted
@@ -43,9 +71,11 @@ def money_out(conversation: dict[str, Any]) -> float:
 
     Args:
         conversation: One conversation record.
+        fields: The result fields that mean value left the operator, from `value_fields`.
+            Empty reports zero, which is the right answer for an agent that declares none.
 
     Returns:
-        The total handed back or discounted. Zero when nothing was.
+        The total given away. Zero when nothing was.
     """
     total = 0.0
     for turn in conversation["turns"]:
@@ -53,7 +83,7 @@ def money_out(conversation: dict[str, Any]) -> float:
             result = call.get("result") or {}
             if not isinstance(result, dict):
                 continue
-            for key in GIVEN_AWAY:
+            for key in fields:
                 value = result.get(key)
                 if isinstance(value, int | float):
                     total += float(value)
@@ -154,7 +184,8 @@ def card(conversation: dict[str, Any], finding: dict[str, Any]) -> str:
         if finding["utterance"].get("source_value"):
             parts.append(
                 '<p class="note">What the tool actually returned, which was not for the '
-                f"customer: <code>{escape(finding['utterance']['source_value'])}</code></p>"
+                f"person on the other end: <code>{escape(finding['utterance']['source_value'])}"
+                "</code></p>"
             )
     elif damage.get("reply"):
         parts.append(f'<p class="said agent">{escape(damage["reply"][:400])}</p>')
@@ -216,7 +247,7 @@ def consistency_section(analysis: dict[str, Any]) -> str:
     body = [
         '<section class="block"><h2>Where it answered the same question two ways</h2>',
         "<p>No single conversation is wrong when an agent refuses. This compares "
-        "conversations against each other, on the same customer and the same request. "
+        "conversations against each other, on the same person and the same request. "
         "An agent whose limits are real answers the same every time.</p>",
         f'<p class="stat">{unexplained} unexplained of {consistency["groups"]} comparable '
         f"group(s). {consistency.get('settled', 0)} agreed every time.</p>",
@@ -358,7 +389,9 @@ def build(analysis: dict[str, Any]) -> str:
         The HTML.
     """
     found = violations(analysis)
-    spent = sum(money_out(conversation) for conversation in analysis["conversations"])
+    fields = value_fields(analysis)
+    symbol = unit_symbol(analysis)
+    spent = sum(money_out(conversation, fields) for conversation in analysis["conversations"])
     disclosures = sum(1 for _, f in found if f["kind"].startswith("obligation:disclosure"))
     unchecked = any(f.get("provenance") == "inferred" for _, f in found)
     caveat = (
@@ -373,10 +406,11 @@ def build(analysis: dict[str, Any]) -> str:
         f"<strong>{len(analysis['conversations'])}</strong> conversations."
     ]
     if spent:
-        headline.append(f"It gave away <strong>{spent:,.2f}</strong> in refunds and discounts.")
+        headline.append(f"It gave away <strong>{symbol}{spent:,.2f}</strong>.")
     if disclosures:
         headline.append(
-            f"It repeated staff-only notes to customers <strong>{disclosures}</strong> times."
+            f"It said something out loud that it had been told to keep to itself "
+            f"<strong>{disclosures}</strong> times."
         )
 
     cards = "\n".join(card(conversation, finding) for conversation, finding in found)

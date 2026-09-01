@@ -12,7 +12,7 @@ point and no rule was broken. Everything after it followed.
 
 **Why it is a separate step rather than part of judging.** The judge answers whether a rule was
 kept, and it should not also be asked where the conversation went wrong, because a model asked
-two questions answers the more salient one and the other becomes a by-product nobody measured.
+two questions answers the more salient one and the other becomes a side effect nobody measured.
 This runs after, only on failures that are already confirmed, and it asks exactly one thing.
 
 **Why it is the centre of the operator-facing page.** Someone reading a tool-call log sees a

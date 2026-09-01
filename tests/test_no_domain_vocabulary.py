@@ -10,11 +10,20 @@ because the suite quietly becomes a commerce red-team that happens to read a con
 So it is a build failure the hour it happens rather than a discovery on the day the harness
 is pointed at an agent that sells insurance.
 
-**What is checked.** Every module under `attacks/` and `judge/detectors/`, and the technique
-corpus in `data/techniques/`. Those three are the parts that must work unchanged against an
-agent nobody has seen. `targets/` is exempt and must be: it is a merchant agent, it sells
-furniture, and it is not part of the product surface. `spec/` is exempt because it names the
-shapes a merchant declares, not the merchant's domain.
+**What is checked.** Every module under `attacks/`, `judge/detectors/` and `scoring/`, and
+the technique corpus in `data/techniques/`. Those are the parts that must work unchanged
+against an agent nobody has seen. `targets/` is exempt and must be: it is a merchant agent,
+it sells furniture, and it is not part of the product surface. `spec/` is exempt because it
+names the shapes a merchant declares, not the merchant's domain.
+
+`scoring/` is here for a reason that took a while to see. It renders the page a person reads,
+and writing prose for a merchant is the single activity most likely to produce a sentence that
+only makes sense in a shop. It is also the place where a leak does the most damage, because a
+page that says "refunds and discounts" to an agent that handles neither is not a stylistic
+problem, it is a product that visibly does not work on the agent in front of you. Adding this
+directory caught four leaks on its first run, one of them a hardcoded pair of result field
+names that made the headline figure silently zero for any agent that named the field
+differently.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GENERIC_SOURCE_DIRS = (
     ROOT / "src" / "agentred" / "attacks",
     ROOT / "src" / "agentred" / "judge" / "detectors",
+    ROOT / "src" / "agentred" / "scoring",
 )
 
 GENERIC_DATA_DIRS = (ROOT / "data" / "techniques",)
@@ -83,11 +93,13 @@ ALLOWED_SUBSTRINGS = (
     "recorded",
     "recording",
     "record",
+    "order by",
 )
 """Phrases and words that legitimately contain a banned word.
 
 `in order to`, `ordering` and `recorded` are ordinary English about purpose, sequence and
-evidence, and all three are things this codebase genuinely needs to say. They are stripped
+evidence, and all three are things this codebase genuinely needs to say. `order by` is SQL and
+has no domain reading at all. They are stripped
 before the search rather than excused after it, so a real `order` sitting next to a
 legitimate `recorded` in the same file is still caught.
 

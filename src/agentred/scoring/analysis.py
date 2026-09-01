@@ -78,7 +78,7 @@ def resolve_runs(store: Store, runs: tuple[str, ...]) -> tuple[dict[str, Any], .
         runs: Run ids to keep. Empty selects every run in the store.
 
     Returns:
-        The selected run rows, in the store's order.
+        The selected run rows, in the sequence the store holds them.
 
     Raises:
         AnalysisError: If any named id is not in the store, or the store holds no runs.
@@ -136,6 +136,44 @@ def damage_turn(finding: Finding) -> int:
     if finding.utterance is not None:
         return finding.utterance.turn
     return -1
+
+
+def declared_rules(spec: Any) -> dict[str, str]:
+    """Every rule the operator wrote down, as rule name to the sentence they wrote.
+
+    The page shows a person their own words, never our identifier for them. A page that says
+    `data_scope.email` has told the reader nothing they can act on and has told them it was
+    written for somebody else. Names with no sentence come back empty rather than missing, so
+    the caller can see that a declared rule was left undescribed instead of silently rendering
+    a blank row that looks like a bug.
+
+    Args:
+        spec: A loaded agent spec.
+
+    Returns:
+        Rule name to its stated sentence, covering bounds, preconditions, obligations and one
+        entry per identifier kind the data scope binds, which is the form the scope detector
+        reports under.
+    """
+    text: dict[str, str] = {}
+    for bound in spec.policy.bounds:
+        text[bound.name] = bound.description
+    for precondition in spec.policy.preconditions:
+        text[precondition.name] = precondition.description
+    for duty in spec.policy.obligations:
+        text[duty.name] = duty.statement or duty.description
+    kinds = spec.policy.data_scope.subject_identifier_kinds
+    for kind in kinds:
+        # One scope, one sentence, but the detector reports it once per identifier it binds
+        # on. Rendered as written, that is the same sentence twice with no way for a reader
+        # to tell the rows apart or to see that they are two different checks. The identifier
+        # is appended only when there is more than one, so the ordinary single-identifier
+        # agent still reads as the operator wrote it.
+        described = spec.policy.data_scope.description
+        text[f"data_scope.{kind}"] = (
+            f"{described} (checked against the {kind})" if len(kinds) > 1 else described
+        )
+    return text
 
 
 def analyse(
@@ -198,6 +236,7 @@ def analyse(
                 for o in inference.obligations
             ],
         }
+        undeclared[name]["declared_rules"] = declared_rules(spec)
         say(f"  {name}: {len(duties[name])} undeclared obligation(s) to judge")
 
     records: list[dict[str, Any]] = []
@@ -295,6 +334,14 @@ def analyse(
         ],
         "conversations": records,
         "policy": undeclared,
+        "presentation": {
+            name: {
+                "unit_symbol": spec.config.unit_symbol,
+                "subject_term": spec.config.subject_term,
+                "value_fields": list(spec.config.value_fields),
+            }
+            for name, spec in specs.items()
+        },
         "consistency": {
             "groups": comparison.groups,
             "settled": comparison.settled,
