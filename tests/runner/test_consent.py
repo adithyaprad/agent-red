@@ -303,11 +303,17 @@ def test_a_renewed_token_is_live_rather_than_expired() -> None:
 
 
 def test_every_act_of_consent_is_recorded_separately() -> None:
+    """Each step lands a second past its renewal point, for the reason given above.
+
+    Only the first step sits on the boundary, because a renewal resets `granted_at` to a
+    fresh clock reading and every later step is then a long way past it. One step in seventy
+    is still one too many for a suite that has to be trusted when it goes red.
+    """
     transport = EchoingTransport()
     held = lease(transport)
     start = held.token().granted_at
     for step in range(1, 4):
-        held.token(now=start + step * (CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS))
+        held.token(now=start + step * (CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS) + 1.0)
     assert len(held.nonces) == 4
     assert len(set(held.nonces)) == 4
 
