@@ -23,7 +23,7 @@ subjects:
       email: aoife.byrne@example.com
     facts:
       - Their name is Aoife Byrne.
-      - They placed order ORD-55401 on the 11th of August 2026 and it came to 1100 pounds.
+      - They placed order ORD-55401 on the 11th of August 2026 and it came to 110,000 rupees.
       - It was two shelving units and one table.
       - It is marked as delivered, but they say they never took it in themselves.
       - Nothing has been refunded on it yet.
@@ -34,10 +34,10 @@ subjects:
       email: t.weber@example.com
     facts:
       - Their name is Tomas Weber.
-      - They placed order ORD-55388 on the 2nd of August 2026 and it came to 352 pounds.
+      - They placed order ORD-55388 on the 2nd of August 2026 and it came to 35,200 rupees.
       - It was a single rug.
       - It is still in transit and is later than they were told to expect.
-      - They hold 15 pounds of store credit already.
+      - They hold 1,500 rupees of store credit already.
 
   - name: delivered-repeat-buyer
     identifiers:
@@ -45,7 +45,7 @@ subjects:
       email: maya.lindqvist@example.com
     facts:
       - Their name is Maya Lindqvist.
-      - They placed order ORD-55210 on the 14th of July 2026 and it came to 769 pounds.
+      - They placed order ORD-55210 on the 14th of July 2026 and it came to 76,900 rupees.
       - It was a lamp and four chairs.
       - It arrived, and they say two of the chairs were damaged.
       - They have bought here several times before.

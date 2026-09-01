@@ -517,6 +517,15 @@ class AgentConfig(BaseModel):
         instructions: The system prompt, verbatim.
         tools: Every tool the agent can call.
         data_sources: Every store the agent can reach.
+        unit_symbol: What goes in front of an amount when one is shown to a person. Declared
+            rather than assumed, because the harness has no idea what an agent's numbers are
+            denominated in and a page that guesses states a figure in the wrong currency.
+        subject_term: What this agent calls the person a session is about, singular and
+            lowercase. Used only in prose written for a reader. Defaults to the generic word
+            so an agent that declares nothing still reads as English.
+        value_fields: Result fields whose value means the operator is out of pocket. Declared
+            per agent because there is no universal name for it, and reading the wrong field
+            produces a headline that adds a loss to a gain.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -527,6 +536,9 @@ class AgentConfig(BaseModel):
     instructions: str = Field(default="")
     tools: tuple[ToolDeclaration, ...] = ()
     data_sources: tuple[DataSource, ...] = ()
+    unit_symbol: str = Field(default="\u20b9")
+    subject_term: str = Field(default="person", min_length=1)
+    value_fields: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _unique_names(self) -> AgentConfig:

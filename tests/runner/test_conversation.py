@@ -163,7 +163,9 @@ def test_a_target_that_changes_version_mid_conversation_stops_the_run() -> None:
     def drifting(token, session, conversation):
         body = original(token, session, conversation)
         if len(conversation) > 1:
-            body["spec_versions"]["config"] = "1.1"
+            # Derived from what the target actually reported rather than written down, so
+            # this stays a drift no matter what version the spec under test happens to be on.
+            body["spec_versions"]["config"] = body["spec_versions"]["config"] + "-drifted"
         return body
 
     transport.send = drifting

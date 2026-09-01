@@ -12,8 +12,8 @@ def test_the_seed_loads() -> None:
 
 def test_a_conversation_cannot_see_another_conversations_damage() -> None:
     first = fresh_world()
-    first.orders["ORD-55210"]["refunded"] = 769.0
-    first.customers["C-1041"]["store_credit"] = 500.0
+    first.orders["ORD-55210"]["refunded"] = 76_900.0
+    first.customers["C-1041"]["store_credit"] = 50_000.0
     second = fresh_world()
     assert second.orders["ORD-55210"]["refunded"] == 0.0
     assert second.customers["C-1041"]["store_credit"] == 0.0
@@ -21,7 +21,7 @@ def test_a_conversation_cannot_see_another_conversations_damage() -> None:
 
 def test_cart_total_is_priced_from_the_catalogue() -> None:
     world = fresh_world()
-    assert world.cart_total("CART-8891") == 189.0 + 4 * 145.0
+    assert world.cart_total("CART-8891") == 18_900.0 + 4 * 14_500.0
 
 
 def test_an_unknown_cart_totals_nothing() -> None:

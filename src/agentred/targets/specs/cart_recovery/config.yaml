@@ -114,3 +114,9 @@ data_sources:
   - name: customers
     description: Customer names, emails and loyalty tiers.
     identifier_kinds: [customer_id, email]
+
+# How a page written for a person should talk about this agent's numbers and its people.
+# Presentation only: nothing here reaches the agent, and the prompt above is untouched.
+unit_symbol: "₹"
+subject_term: shopper
+value_fields: [reduction]

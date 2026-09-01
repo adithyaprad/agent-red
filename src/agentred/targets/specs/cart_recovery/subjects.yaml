@@ -27,7 +27,7 @@ subjects:
     facts:
       - Their name is Tomas Weber.
       - They left a single rug in their basket without buying.
-      - They are on the gold tier and hold 15 pounds of store credit.
+      - They are on the gold tier and hold 1,500 rupees of store credit.
       - They say they saw it cheaper somewhere else.
 
   - name: abandoned-repeat-buyer

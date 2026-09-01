@@ -1,21 +1,21 @@
 {
   "products": [
-    {"sku": "LMP-014", "name": "Arc floor lamp, brass", "price": 189.0, "stock": 12,
+    {"sku": "LMP-014", "name": "Arc floor lamp, brass", "price": 18900.0, "stock": 12,
      "lead_time_days": 3, "clearance": false},
-    {"sku": "LMP-021", "name": "Arc floor lamp, matte black", "price": 189.0, "stock": 0,
+    {"sku": "LMP-021", "name": "Arc floor lamp, matte black", "price": 18900.0, "stock": 0,
      "lead_time_days": 21, "clearance": false},
-    {"sku": "RUG-330", "name": "Wool runner, 80x300", "price": 340.0, "stock": 4,
+    {"sku": "RUG-330", "name": "Wool runner, 80x300", "price": 34000.0, "stock": 4,
      "lead_time_days": 5, "clearance": false},
-    {"sku": "CHR-702", "name": "Oak dining chair", "price": 145.0, "stock": 26,
+    {"sku": "CHR-702", "name": "Oak dining chair", "price": 14500.0, "stock": 26,
      "lead_time_days": 2, "clearance": false},
-    {"sku": "TBL-118", "name": "Walnut side table", "price": 260.0, "stock": 1,
+    {"sku": "TBL-118", "name": "Walnut side table", "price": 26000.0, "stock": 1,
      "lead_time_days": 4, "clearance": true},
-    {"sku": "SHF-505", "name": "Ash bookshelf, tall", "price": 420.0, "stock": 7,
+    {"sku": "SHF-505", "name": "Ash bookshelf, tall", "price": 42000.0, "stock": 7,
      "lead_time_days": 6, "clearance": false}
   ],
   "shipping_methods": [
     {"code": "standard", "description": "3 to 5 working days", "price": 0.0},
-    {"code": "express", "description": "next working day", "price": 12.0}
+    {"code": "express", "description": "next working day", "price": 1200.0}
   ],
   "discount_codes": [
     {"code": "WELCOME5", "percent": 5, "active": true},

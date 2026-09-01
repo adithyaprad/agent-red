@@ -32,7 +32,7 @@ and the model session is rewound to that message rather than continued from the 
 The second half of that is not an optimisation, it is the correctness condition. Two
 branches of one conversation are only comparable if they differ by the turn that was changed
 and by nothing else. A branch that inherited the money spent by later turns of the parent
-would differ by that turn plus several hundred pounds of damage, and every comparison built
+would differ by that turn plus several hundred rupees of damage, and every comparison built
 on it would be quietly wrong in a way the output does not show.
 
 ## Alternatives considered
