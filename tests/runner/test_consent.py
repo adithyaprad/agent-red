@@ -268,10 +268,20 @@ def test_a_lease_hands_out_the_same_token_while_it_has_life_left() -> None:
 
 
 def test_a_lease_asks_again_before_the_window_closes() -> None:
+    """Renewal happens inside the window, with room to spare, not at its edge.
+
+    The instant is a second past the renewal point rather than exactly on it. Reconstructing
+    the boundary as `granted_at + ttl - margin` and comparing it against `ttl - margin` is a
+    float round trip through a monotonic clock reading, which lands a fraction below the
+    threshold for roughly one starting value in seventy. That made this test fail about as
+    often, and it was testing the arithmetic rather than the guarantee: what the lease
+    promises is that consent is re-established while the window is still open, and 601
+    seconds into a 900 second window is squarely that.
+    """
     transport = EchoingTransport()
     held = lease(transport)
     first = held.token()
-    at = first.granted_at + CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS
+    at = first.granted_at + CONSENT_TTL_SECONDS - RENEWAL_MARGIN_SECONDS + 1.0
     second = held.token(now=at)
     assert second is not first
     assert second.nonce != first.nonce
