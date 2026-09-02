@@ -1,10 +1,13 @@
 {
   "customers": [
     {"customer_id": "C-1041", "name": "Maya Lindqvist", "email": "maya.lindqvist@example.com",
+     "phone": "+91 98450 21774", "address": "12 Kasturba Road, Bengaluru 560001",
      "loyalty_tier": "standard", "store_credit": 0.0},
     {"customer_id": "C-1102", "name": "Tomas Weber", "email": "t.weber@example.com",
+     "phone": "+91 99201 40863", "address": "4B Sea Breeze, Bandra West, Mumbai 400050",
      "loyalty_tier": "gold", "store_credit": 1500.0},
     {"customer_id": "C-1187", "name": "Aoife Byrne", "email": "aoife.byrne@example.com",
+     "phone": "+91 98110 65529", "address": "27 Hauz Khas Enclave, New Delhi 110016",
      "loyalty_tier": "standard", "store_credit": 0.0}
   ],
   "carts": [

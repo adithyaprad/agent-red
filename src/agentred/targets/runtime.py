@@ -138,6 +138,10 @@ class ChallengeResponse(BaseModel):
         tool_server: Where this target will reach its tools. Compared with the registry
             before the first attack turn, because a target calling tools at a server the run
             is not recording produces a run that quietly measures nothing.
+        versions: The four versions of the spec this process actually loaded. A server reads
+            its spec once and holds it for as long as it runs, so a spec edited afterwards is
+            on disk and not in the target. Reported here so the harness can refuse in one line
+            rather than after a suite of model calls. See D24.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -146,6 +150,7 @@ class ChallengeResponse(BaseModel):
     agent_id: str
     mode: str
     tool_server: str = ""
+    versions: dict[str, str] = Field(default_factory=dict)
 
 
 @dataclass
@@ -381,13 +386,15 @@ class TargetAgent:
         id is returned with it so a registry entry cannot be quietly repointed at a different
         agent, the mode so the harness can refuse to attack anything that is not a test, and
         the tool server so the harness can refuse a target whose calls would land somewhere
-        it is not reading.
+        it is not reading, and the spec versions so a target holding a spec that has since
+        been edited is refused here rather than discovered at persistence.
         """
         return ChallengeResponse(
             challenge=nonce,
             agent_id=self.spec.config.agent_id,
             mode=TEST_MODE,
             tool_server=self.tool_server_url,
+            versions=self.spec.version_tuple.model_dump(mode="json"),
         )
 
 

@@ -35,6 +35,11 @@ class World:
         customers: Customer records keyed by customer id.
         carts: Abandoned carts keyed by cart id.
         orders: Orders keyed by order id.
+        disputes: Chargebacks keyed by dispute id. Each carries the reason the buyer wrote,
+            which is text the merchant never authored and an adversary can choose.
+        settled_keys: Deduplication keys a payment action has already been given, to the
+            result it produced. A real payments API refuses to charge twice for one key, and
+            a synthetic one that did not would make a correctly written agent look reckless.
         ledger: Money and obligations the conversation created, in call order. The judge
             reads the tool-call log rather than this, but a target that keeps its own
             record makes an argument about what happened settleable.
@@ -46,6 +51,8 @@ class World:
     customers: dict[str, dict[str, Any]] = field(default_factory=dict)
     carts: dict[str, dict[str, Any]] = field(default_factory=dict)
     orders: dict[str, dict[str, Any]] = field(default_factory=dict)
+    disputes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    settled_keys: dict[str, dict[str, Any]] = field(default_factory=dict)
     ledger: list[dict[str, Any]] = field(default_factory=list)
 
     def customer_by_email(self, email: str) -> dict[str, Any] | None:
@@ -91,6 +98,7 @@ def _seed() -> World:
     catalog = json.loads((STORE_DIR / "catalog.json").read_text(encoding="utf-8"))
     people = json.loads((STORE_DIR / "customers.json").read_text(encoding="utf-8"))
     orders = json.loads((STORE_DIR / "orders.json").read_text(encoding="utf-8"))
+    disputes = json.loads((STORE_DIR / "disputes.json").read_text(encoding="utf-8"))
     return World(
         products={row["sku"]: row for row in catalog["products"]},
         shipping_methods={row["code"]: row for row in catalog["shipping_methods"]},
@@ -98,6 +106,7 @@ def _seed() -> World:
         customers={row["customer_id"]: row for row in people["customers"]},
         carts={row["cart_id"]: row for row in people["carts"]},
         orders={row["order_id"]: row for row in orders["orders"]},
+        disputes={row["dispute_id"]: row for row in disputes["disputes"]},
     )
 
 

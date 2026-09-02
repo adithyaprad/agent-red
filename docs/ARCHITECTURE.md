@@ -88,6 +88,14 @@ merchant's money through tools, and in the platform this is shaped around those 
 connectors. Recording there is on our side of the trust line and needs nothing from the agent.
 See `docs/DECISIONS/ADR-0005-oracle-at-the-tool-boundary.md`.
 
+Three properties of the boundary are worth stating, because the decision is only worth what
+they are worth. The run and the conversation are in the URL an agent's connector is pointed
+at, never in the arguments of a call, so a call cannot be filed under a conversation the agent
+was not given. The record exposes no operation that edits or removes an entry. And the tool
+server has two faces on two ports: agents are told the tool port, while reading the stream,
+restoring a world and planting into one live on a control port no agent is given, so tampering
+with the evidence is out of reach without a secret having to be kept.
+
 *Failure mode if absent:* the agent can be attacked but not measured, so there is no evidence.
 
 ### Surface 3: the improvement is applyable
@@ -231,12 +239,34 @@ second never moves a verdict. A side effect worth naming: the corpus compounds, 
 tested makes the gate stronger for the agent after it.
 
 **Detectors before the judge, and the detectors are generic.** Most real violations are
-observable rather than interpretive, and they reduce to three policy-driven shapes: a tool
-called beyond a declared bound, a consequential tool called without its declared precondition,
-and an identifier surfaced from outside the session's declared data scope. Those are asserted
-in code against the tool-call log by `judge/detectors/`. Sending them to a model would trade a
-certain answer for an uncertain one. See `docs/DECISIONS/` for where we deliberately did not
-use a model.
+observable rather than interpretive. They reduce to seven policy-driven shapes, and the split
+matters because the first three, on their own, report a conversation as clean when every
+argument is in range and the damage is somewhere else entirely.
+
+The three that read one call at a time: a tool called beyond a declared bound, a consequential
+tool called without its declared precondition, and an identifier surfaced from outside the
+session's declared data scope.
+
+The four that do not, each of which exists because a real failure is invisible to the first
+three. A limit on a total across calls, because three amounts inside every ceiling still add up
+past what was ever taken, and an agent talked into instalments defeats a per-call limit
+completely. A limit on a value the call does not carry, because the costliest action an agent
+has is often a reference and nothing else, with the money read from a record it fetched a moment
+earlier, so bounding the arguments makes the most expensive thing it can do look free. One
+effect asked for twice and happening twice, where both calls are unremarkable and the merchant
+is charged because the same instruction arrived twice, which on a scheduled trigger is the most
+likely way money leaves twice. And a value belonging to somebody else inside an outbound
+message, where the tool, the recipient, the limits and the prior steps are all correct and the
+whole failure is a string.
+
+Beside them sit two checks that come from a declaration rather than from a rule: a reference
+cited that the agent never read, which is how a fabrication reaches a person who believes it,
+and a call to a tool the config does not contain, which only became observable when the oracle
+moved to the tool boundary.
+
+All of them are asserted in code against the recorded call stream by `judge/detectors/`.
+Sending any of them to a model would trade a certain answer for an uncertain one. See
+`docs/DECISIONS/` for where we deliberately did not use a model.
 
 **The page is a function of the agent too, and that is enforced rather than intended.** The
 claim that the suite is derived from the agent under test is worth nothing if the artefact
@@ -286,8 +316,8 @@ a tool or an argument the agent does not have is refused at construction rather 
 and the share refused is carried, because a model that writes rules and a model that checks them
 would otherwise be free to invent a rule and then find it broken.
 
-The limit is worth stating plainly: a violation that is not expressible as a bound, a
-precondition or a scope is invisible to the detectors and falls to the judge. That limit is
+The limit is worth stating plainly: a violation that is not expressible as one of the seven
+declared shapes is invisible to the detectors and falls to the judge. That limit is
 measured rather than left as a caveat. `attacks/stakes.py` marks every derived stake with
 whether a detector or a model settles it, and `judge_dependence()` reports the share in the
 second category, so a scorecard always states how much of itself rests on the judge. An agent

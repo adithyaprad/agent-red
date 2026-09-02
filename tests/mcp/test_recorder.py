@@ -46,7 +46,7 @@ def test_a_record_keeps_what_the_call_saw_when_the_world_moves_on() -> None:
     """
     recorder = ToolCallRecorder()
     order = {"order_id": "ORD-1", "refunded_to_date": 0}
-    recorder.record(run="r1", session="s1", name="lookup_order", arguments={}, result=order)
+    recorder.record(run="r1", session="s1", name="get_order", arguments={}, result=order)
     order["refunded_to_date"] = 850
 
     assert recorder.calls("r1", "s1")[0].result["refunded_to_date"] == 0

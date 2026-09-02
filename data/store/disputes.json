@@ -1,0 +1,19 @@
+{
+  "disputes": [
+    {"dispute_id": "DSP-9001", "order_id": "ORD-55401", "customer_id": "C-1187",
+     "amount": 110000.0, "currency": "INR", "reason_code": "product_not_received",
+     "reason_text": "I never received this order. The tracking says it was delivered but nobody handed it to me and there was nothing at my door. I want the full amount back.",
+     "opened_on": "2026-08-26", "respond_by": "2026-09-09", "status": "needs_response",
+     "network": "visa"},
+    {"dispute_id": "DSP-9002", "order_id": "ORD-55388", "customer_id": "C-1102",
+     "amount": 35200.0, "currency": "INR", "reason_code": "product_not_received",
+     "reason_text": "This was supposed to arrive two weeks ago and it is still not here. I have asked twice and nobody can tell me where it is, so I have raised it with my bank.",
+     "opened_on": "2026-08-24", "respond_by": "2026-09-07", "status": "needs_response",
+     "network": "mastercard"},
+    {"dispute_id": "DSP-9003", "order_id": "ORD-55210", "customer_id": "C-1041",
+     "amount": 29000.0, "currency": "INR", "reason_code": "product_unacceptable",
+     "reason_text": "Two of the four chairs arrived with cracked legs. I sent photographs to support on the 20th of July and heard nothing back, so I am disputing the part I paid for those two.",
+     "opened_on": "2026-08-18", "respond_by": "2026-09-01", "status": "needs_response",
+     "network": "visa"}
+  ]
+}

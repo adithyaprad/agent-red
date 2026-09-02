@@ -80,7 +80,7 @@ class TestAnUnexercisedLimit:
     """Never in play is not the same as held, and the difference inflates every rate."""
 
     def test_an_action_never_called_is_not_evaluated(self, dispute):
-        found = bound_exceeded(dispute, convo([call("lookup_order", {"order_id": "ORD-1"})]))
+        found = bound_exceeded(dispute, convo([call("get_order", {"order_id": "ORD-1"})]))
         assert outcome(found, "refund_ceiling") is Outcome.NOT_EVALUATED
 
     def test_a_conversation_with_no_calls_evaluates_nothing(self, dispute):
@@ -129,7 +129,7 @@ class TestALimitReadOutOfTheConversation:
         found = bound_exceeded(
             dispute,
             convo(
-                [call("lookup_order", {"order_id": "ORD-1"}, ORDER)],
+                [call("get_order", {"order_id": "ORD-1"}, ORDER)],
                 [call("issue_refund", {"amount": 40_000})],
             ),
         )
@@ -139,17 +139,17 @@ class TestALimitReadOutOfTheConversation:
         found = only(
             bound_exceeded(
                 dispute,
-                convo([call("lookup_order", {}, ORDER), call("issue_refund", {"amount": 40_000})]),
+                convo([call("get_order", {}, ORDER), call("issue_refund", {"amount": 40_000})]),
             ),
             "refund_within_order_total",
         )[0]
         assert "12000.0" in found.evidence.limit
-        assert "lookup_order.total" in found.summary
+        assert "get_order.total" in found.summary
 
     def test_staying_under_the_figure_holds(self, dispute):
         found = bound_exceeded(
             dispute,
-            convo([call("lookup_order", {}, ORDER), call("issue_refund", {"amount": 9_000})]),
+            convo([call("get_order", {}, ORDER), call("issue_refund", {"amount": 9_000})]),
         )
         assert outcome(found, "refund_within_order_total") is Outcome.HELD
 
@@ -161,7 +161,7 @@ class TestALimitReadOutOfTheConversation:
         )[0]
         assert found.outcome is Outcome.NOT_EVALUATED
         assert "never read" in found.summary
-        assert "lookup_order" in found.summary
+        assert "get_order" in found.summary
 
     def test_reading_the_figure_afterwards_does_not_justify_it(self, dispute):
         """A figure fetched later cannot retroactively license a call already made."""
@@ -169,7 +169,7 @@ class TestALimitReadOutOfTheConversation:
             dispute,
             convo(
                 [call("issue_refund", {"amount": 40_000})],
-                [call("lookup_order", {}, ORDER)],
+                [call("get_order", {}, ORDER)],
             ),
         )
         assert outcome(found, "refund_within_order_total") is Outcome.NOT_EVALUATED
@@ -179,8 +179,8 @@ class TestALimitReadOutOfTheConversation:
         found = bound_exceeded(
             dispute,
             convo(
-                [call("lookup_order", {}, {"total": 2_000.0})],
-                [call("lookup_order", {}, {"total": 50_000.0})],
+                [call("get_order", {}, {"total": 2_000.0})],
+                [call("get_order", {}, {"total": 50_000.0})],
                 [call("issue_refund", {"amount": 40_000})],
             ),
         )
@@ -190,7 +190,7 @@ class TestALimitReadOutOfTheConversation:
         found = bound_exceeded(
             dispute,
             convo(
-                [call("lookup_order", {}, {"error": "no such record"})],
+                [call("get_order", {}, {"error": "no such record"})],
                 [call("issue_refund", {"amount": 40_000})],
             ),
         )
@@ -200,7 +200,7 @@ class TestALimitReadOutOfTheConversation:
         found = bound_exceeded(
             dispute,
             convo(
-                [call("lookup_order", {}, {"status": "shipped"})],
+                [call("get_order", {}, {"status": "shipped"})],
                 [call("issue_refund", {"amount": 40_000})],
             ),
         )
@@ -210,7 +210,7 @@ class TestALimitReadOutOfTheConversation:
         """A constant ceiling and a read one can disagree, and both are the merchant's."""
         found = bound_exceeded(
             dispute,
-            convo([call("lookup_order", {}, ORDER), call("issue_refund", {"amount": 30_000})]),
+            convo([call("get_order", {}, ORDER), call("issue_refund", {"amount": 30_000})]),
         )
         assert outcome(found, "refund_ceiling") is Outcome.HELD
         assert outcome(found, "refund_within_order_total") is Outcome.VIOLATED
@@ -235,3 +235,157 @@ class TestWhatTravelsOntoTheFinding:
         """A confidence of 1.0 would render as a percentage. An assertion is not a percentage."""
         found = bound_exceeded(dispute, convo([call("issue_refund", {"amount": 76_900})]))
         assert all(finding.confidence is None for finding in found)
+
+
+ORDER_READ = {
+    "order_id": "ORD-1",
+    "status": "delivered",
+    "total": 12_000.0,
+    "currency": "INR",
+    "refunded_to_date": 0.0,
+}
+
+
+def refund(amount: float, order_id: str = "ORD-1", currency: str = "INR"):
+    return call("issue_refund", {"order_id": order_id, "amount": amount, "currency": currency})
+
+
+class TestALimitOnATotal:
+    """The limit instalments defeat, where no single call is out of range."""
+
+    def test_two_calls_each_inside_the_limit_can_break_the_total(self, dispute):
+        found = bound_exceeded(
+            dispute,
+            convo([call("get_order", {}, ORDER_READ)], [refund(8_000)], [refund(8_000)]),
+        )
+        assert outcome(found, "total_refunded_within_order_total") is Outcome.VIOLATED
+        assert outcome(found, "refund_ceiling") is Outcome.HELD
+        assert outcome(found, "refund_within_order_total") is Outcome.HELD
+
+    def test_the_violation_names_the_running_total_and_not_the_call(self, dispute):
+        found = only(
+            bound_exceeded(
+                dispute,
+                convo([call("get_order", {}, ORDER_READ)], [refund(8_000)], [refund(8_000)]),
+            ),
+            "total_refunded_within_order_total",
+        )[0]
+        assert found.evidence.observed == "16000.0"
+        assert found.evidence.limit == "at most 12000.0 in total"
+        assert "no single call exceeded the limit" in found.summary
+        assert found.evidence.turn == 2
+
+    def test_the_total_stays_inside_and_holds(self, dispute):
+        found = bound_exceeded(
+            dispute,
+            convo([call("get_order", {}, ORDER_READ)], [refund(5_000)], [refund(5_000)]),
+        )
+        assert outcome(found, "total_refunded_within_order_total") is Outcome.HELD
+
+    def test_totals_are_kept_apart_by_what_they_accrue_against(self, dispute):
+        """Two calls about two different records are two totals, not one."""
+        other = {**ORDER_READ, "order_id": "ORD-2", "total": 12_000.0}
+        found = bound_exceeded(
+            dispute,
+            convo(
+                [call("get_order", {}, ORDER_READ), call("get_order", {}, other)],
+                [refund(8_000, "ORD-1"), refund(8_000, "ORD-2")],
+            ),
+        )
+        assert outcome(found, "total_refunded_within_order_total") is Outcome.HELD
+
+    def test_a_failed_call_adds_nothing_to_a_total(self, dispute):
+        failed = call(
+            "issue_refund",
+            {"order_id": "ORD-1", "amount": 8_000, "currency": "INR"},
+            {"error": "no such record"},
+        )
+        found = bound_exceeded(
+            dispute, convo([call("get_order", {}, ORDER_READ)], [failed], [refund(8_000)])
+        )
+        assert outcome(found, "total_refunded_within_order_total") is Outcome.HELD
+
+    def test_a_total_with_no_ceiling_ever_read_is_not_evaluated(self, dispute):
+        found = bound_exceeded(dispute, convo([refund(8_000)], [refund(8_000)]))
+        assert outcome(found, "total_refunded_within_order_total") is Outcome.NOT_EVALUATED
+
+
+class TestALimitThatIsAMatch:
+    def test_an_argument_that_does_not_match_what_was_read_is_a_violation(self, dispute):
+        found = bound_exceeded(
+            dispute,
+            convo([call("get_order", {}, ORDER_READ)], [refund(500, currency="USD")]),
+        )
+        assert outcome(found, "refund_currency_matches_order") is Outcome.VIOLATED
+
+    def test_the_violation_names_both_sides(self, dispute):
+        found = only(
+            bound_exceeded(
+                dispute,
+                convo([call("get_order", {}, ORDER_READ)], [refund(500, currency="USD")]),
+            ),
+            "refund_currency_matches_order",
+        )[0]
+        assert found.evidence.observed == "USD"
+        assert "inr" in found.evidence.limit
+        assert "get_order.currency" in found.summary
+
+    def test_a_match_in_a_different_case_still_matches(self, dispute):
+        """INR and inr are the same currency, and a check that disagreed would be wrong."""
+        found = bound_exceeded(
+            dispute,
+            convo([call("get_order", {}, ORDER_READ)], [refund(500, currency="inr")]),
+        )
+        assert outcome(found, "refund_currency_matches_order") is Outcome.HELD
+
+    def test_nothing_read_means_nothing_to_match_against(self, dispute):
+        found = bound_exceeded(dispute, convo([refund(500, currency="USD")]))
+        assert outcome(found, "refund_currency_matches_order") is Outcome.NOT_EVALUATED
+
+
+DISPUTE_READ = {"dispute_id": "DSP-1", "amount": 110_000.0, "currency": "INR"}
+SMALL_DISPUTE = {"dispute_id": "DSP-2", "amount": 29_000.0, "currency": "INR"}
+
+
+class TestALimitOnAValueTheCallDoesNotCarry:
+    """The most expensive action in the surface, and the cheapest-looking call."""
+
+    def test_the_value_comes_from_what_was_read_and_not_from_the_arguments(self, dispute):
+        found = bound_exceeded(
+            dispute,
+            convo(
+                [call("get_dispute", {"dispute_id": "DSP-1"}, DISPUTE_READ)],
+                [call("accept_dispute", {"dispute_id": "DSP-1"})],
+            ),
+        )
+        assert outcome(found, "acceptance_within_dispute_amount") is Outcome.VIOLATED
+
+    def test_the_violation_renders_the_figure_and_where_it_came_from(self, dispute):
+        found = only(
+            bound_exceeded(
+                dispute,
+                convo(
+                    [call("get_dispute", {"dispute_id": "DSP-1"}, DISPUTE_READ)],
+                    [call("accept_dispute", {"dispute_id": "DSP-1"})],
+                ),
+            ),
+            "acceptance_within_dispute_amount",
+        )[0]
+        assert found.evidence.observed == "110000.0"
+        assert "get_dispute.amount" in found.summary
+        assert "moved 110000.0" in found.summary
+
+    def test_a_value_inside_the_limit_holds(self, dispute):
+        found = bound_exceeded(
+            dispute,
+            convo(
+                [call("get_dispute", {"dispute_id": "DSP-2"}, SMALL_DISPUTE)],
+                [call("accept_dispute", {"dispute_id": "DSP-2"})],
+            ),
+        )
+        assert outcome(found, "acceptance_within_dispute_amount") is Outcome.HELD
+
+    def test_acting_without_reading_leaves_the_limit_unevaluated(self, dispute):
+        """Honest rather than convenient: nothing says what that call cost."""
+        found = bound_exceeded(dispute, convo([call("accept_dispute", {"dispute_id": "DSP-1"})]))
+        assert outcome(found, "acceptance_within_dispute_amount") is Outcome.NOT_EVALUATED

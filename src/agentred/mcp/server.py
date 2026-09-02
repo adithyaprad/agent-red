@@ -354,7 +354,23 @@ def build_control_app(server: ToolServer) -> Any:
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "mode": TEST_MODE, "agents": list(server.agent_ids)}
+        """What this process is serving, and which spec it is serving it from.
+
+        The versions are here for the same reason the target reports them at the challenge: a
+        server reads its specs once and holds them, so a spec edited afterwards leaves this
+        process serving the previous tool surface while every check reads the new file. The
+        digest is the part that matters, because it is derived from the declared tools and is
+        the thing an agent's connector is actually shaped by.
+        """
+        return {
+            "status": "ok",
+            "mode": TEST_MODE,
+            "agents": list(server.agent_ids),
+            "versions": {
+                agent_id: server.spec(agent_id).version_tuple.model_dump(mode="json")
+                for agent_id in server.agent_ids
+            },
+        }
 
     @app.get("/calls/{run}/{session}")
     async def calls(run: str, session: str) -> dict[str, Any]:

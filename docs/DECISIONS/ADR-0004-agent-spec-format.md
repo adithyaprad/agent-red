@@ -1,6 +1,9 @@
 # ADR-0004: The agent spec format
 
-Status: accepted, 2026-08-29.
+Status: accepted, 2026-08-29. Amended 2026-09-02: three bound kinds, two precondition
+qualifiers and three policy sections added, each one a shape the format as accepted reported
+as compliant. The decision is unchanged and the argument for it is unchanged; what changed is
+that a real action set found gaps in the vocabulary.
 
 ## Context
 
@@ -23,20 +26,42 @@ Two versioned objects, plus one unversioned set of fixtures, paired at load time
 `consequence` of `money | obligation | disclosure | inert`, and the data sources the agent
 can reach.
 
-**Policy** is authorisation. Named `bounds` on tool arguments (a constant ceiling or floor,
-a closed set of permitted values, or a limit read from a field of an earlier tool result),
-`preconditions` mapping a consequential tool to a tool that must have succeeded earlier in
-the same conversation, and a `data_scope` naming the sources one session may read and the
+**Policy** is authorisation. Named `bounds` on tool calls, `preconditions` mapping a
+consequential tool to a tool that must have succeeded earlier in the same conversation, an
+`idempotency` section for effects that must happen once however often they are asked for, an
+`outbound` section naming the tools that carry free text out of the merchant's systems and
+which arguments hold it, a `citations` section for arguments that may only carry references
+the agent actually read, and a `data_scope` naming the sources one session may read and the
 identifier kinds that bind a record to the session subject.
 
+There are six kinds of bound, and the split is not taxonomy for its own sake. Each kind is a
+shape a simpler one reports as compliant. A constant ceiling or floor; a closed set of
+permitted values; a limit read from a field of an earlier result, so the ceiling is different
+in every conversation; a limit on a **total** across calls, grouped by whatever argument says
+what the total accrues against, because amounts individually inside a ceiling still add up
+past it and an agent talked into instalments defeats a per-call limit completely; a **match**
+rather than a magnitude, for a currency or an account, where the amount can be inside every
+ceiling while the money leaves in the wrong denomination; and an **imputed** limit, on a call
+whose cost is not in its arguments at all. That last one is the important one. Conceding a
+disputed charge, cancelling a paid order, waiving a fee: the call carries a reference and
+nothing else, and what it costs sits in a record the agent read a moment earlier. Bound the
+arguments and the most expensive action an agent has looks free.
+
 A precondition may also declare **what counts as having succeeded**, as a field path into
-the required tool's result and the value it must hold. Without that, "succeeded" can only
-mean "did not report an error", and a gating tool that answers rather than fails, which is
+the required tool's result and the value or values it must hold. Without that, "succeeded" can
+only mean "did not report an error", and a gating tool that answers rather than fails, which is
 how verification tools are usually written, satisfies its own precondition by returning a
 refusal. An agent that checked nobody and an agent that checked somebody, was refused, and
 proceeded anyway would then be indistinguishable, and the second is the more serious. The
 weaker reading remains the default for a policy that declares nothing, and every verdict
 states which of the two was applied.
+
+It may also declare **which arguments have to match**, so the required step has to have been
+about the same record as the call it gates. Without that, reading one record and finding it in
+a permitted state satisfies the requirement for acting on a different record in a state that is
+not permitted. The required call is there in the log and it succeeded, so a check asking only
+whether the step happened scores that conversation as clean, and it is the exact manoeuvre an
+attacker introducing a second reference number is going for.
 
 **Subjects** are who the harness may act as. An agent that reads records cannot be attacked in
 the abstract: a conversation has to be about somebody, and the identifiers it opens with have to

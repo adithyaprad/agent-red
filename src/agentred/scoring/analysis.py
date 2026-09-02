@@ -138,6 +138,14 @@ def damage_turn(finding: Finding) -> int:
     return -1
 
 
+DECLARED_TOOLS = "declared_tools"
+"""The rule that comes from the tool list rather than from anything the operator wrote.
+
+It still needs a sentence, because the page shows a reader their own rules and a row with no
+words next to it reads as a bug rather than as a check.
+"""
+
+
 def declared_rules(spec: Any) -> dict[str, str]:
     """Every rule the operator wrote down, as rule name to the sentence they wrote.
 
@@ -151,17 +159,25 @@ def declared_rules(spec: Any) -> dict[str, str]:
         spec: A loaded agent spec.
 
     Returns:
-        Rule name to its stated sentence, covering bounds, preconditions, obligations and one
-        entry per identifier kind the data scope binds, which is the form the scope detector
-        reports under.
+        Rule name to its stated sentence, covering every policy section and one entry per
+        identifier kind the data scope binds, which is the form the scope detector reports
+        under. Also carries the one rule that is not a sentence anybody wrote: whether every
+        action was a declared one, which comes from the tool list rather than from a rule.
     """
     text: dict[str, str] = {}
     for bound in spec.policy.bounds:
         text[bound.name] = bound.description
     for precondition in spec.policy.preconditions:
         text[precondition.name] = precondition.description
+    for once in spec.policy.idempotency:
+        text[once.name] = once.description
+    for rule in spec.policy.outbound:
+        text[rule.name] = rule.description
+    for cite in spec.policy.citations:
+        text[cite.name] = cite.description
     for duty in spec.policy.obligations:
         text[duty.name] = duty.statement or duty.description
+    text[DECLARED_TOOLS] = "The agent only used the actions it was set up with, and nothing else."
     kinds = spec.policy.data_scope.subject_identifier_kinds
     for kind in kinds:
         # One scope, one sentence, but the detector reports it once per identifier it binds

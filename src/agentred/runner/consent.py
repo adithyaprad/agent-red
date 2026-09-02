@@ -8,9 +8,9 @@ safe will believe the paragraph and nobody else has to, so it is enforced here i
 Two things make it enforceable. A target is resolved by name from a registry file, so no
 function in this module accepts a bare URL. And before the first attack turn the harness
 sends a fresh nonce and requires the target to echo it back, along with the agent id it
-believes it is and the mode it is running in. An endpoint nobody configured to answer that
-cannot be attacked by this harness, which is the intended behaviour rather than a
-limitation to work around.
+believes it is, the mode it is running in, and the versions of the spec it actually loaded.
+An endpoint nobody configured to answer that cannot be attacked by this harness, which is
+the intended behaviour rather than a limitation to work around.
 
 The proof that consent was established is a `ConsentToken`, which cannot be constructed
 outside this module. Everything that sends a turn takes one, so a code path that reaches a
@@ -466,7 +466,60 @@ def establish_consent(
 
     body = transport.fetch_challenge(target.challenge_url, nonce)
     _verify(target, nonce, body)
+    _verify_versions(target, body)
     return _issue(target, nonce)
+
+
+def _verify_versions(target: RegisteredTarget, body: dict[str, Any]) -> None:
+    """Check that the target is holding the spec that is currently on disk.
+
+    A target reads its spec once and holds it for as long as the process runs. Edit the spec
+    and restart nothing, and every later check reads the new file while the agent under test
+    is still the old one. The run then completes and fails at persistence, on the version
+    tuple, after every model call in it has been paid for. That is D24, and it cost run 0008.
+
+    The comparison is only made when the target reports its versions, so an older target that
+    does not is not refused for a field it never had. It is reported by everything in this
+    tree, and a target that omits it is checked as far as it can be.
+
+    Args:
+        target: The registry entry, whose `spec_dir` holds the spec on disk.
+        body: The challenge response.
+
+    Raises:
+        ChallengeFailedError: If the target holds a different spec from the one on disk, or
+            if the spec on disk cannot be read at all.
+    """
+    reported = body.get("versions")
+    if not isinstance(reported, dict) or not reported:
+        return
+
+    from agentred.spec import SpecError, load_spec_dir
+
+    try:
+        on_disk = load_spec_dir(target.spec_dir).version_tuple.model_dump(mode="json")
+    except SpecError as error:
+        raise ChallengeFailedError(
+            f"{target.name!r} answered the challenge, but its spec at {target.spec_dir} could "
+            f"not be read, so there is nothing to check what it is running against: {error}"
+        ) from error
+
+    differing = sorted(
+        field for field, value in on_disk.items() if str(reported.get(field, "")) != str(value)
+    )
+    if not differing:
+        return
+
+    detail = ", ".join(
+        f"{field}: running {reported.get(field, '(absent)')!r}, on disk {on_disk[field]!r}"
+        for field in differing
+    )
+    raise ChallengeFailedError(
+        f"{target.name!r} is running a different version of its spec than the one in "
+        f"{target.spec_dir} ({detail}). A target loads its spec once, so restart it. Left "
+        f"alone this run completes, costs every model call in it, and is then refused on the "
+        f"version tuple when the first transcript is written."
+    )
 
 
 def _verify(target: RegisteredTarget, nonce: str, body: dict[str, Any]) -> None:

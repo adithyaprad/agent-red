@@ -7,14 +7,21 @@ from agentred.spec import (
     AgentConfig,
     AgentPolicy,
     AgentSpec,
+    CitationRequirement,
     Consequence,
+    CumulativeBound,
     DataScope,
     DataSource,
     EnumeratedBound,
+    IdempotencyRequirement,
+    ImputedBound,
+    MatchingBound,
     NumericBound,
+    OutboundRule,
     Precondition,
     Provenance,
     RelationalBound,
+    ResultCondition,
     ResultReference,
     ToolDeclaration,
 )
@@ -346,3 +353,253 @@ class TestUngatedConsequentialTools:
             ),
         )
         assert [t.name for t in spec.ungated_consequential_tools()] == ["promise_delivery"]
+
+
+def text_tool(name, consequence=Consequence.INERT, arguments=("body",)):
+    """A tool whose arguments are strings rather than numbers."""
+    return ToolDeclaration(
+        name=name,
+        consequence=consequence,
+        parameters={
+            "type": "object",
+            "properties": {argument: {"type": "string"} for argument in arguments},
+        },
+    )
+
+
+class TestCumulativeBounds:
+    def test_needs_exactly_one_ceiling(self):
+        with pytest.raises(ValidationError, match="exactly one of maximum and maximum_from"):
+            CumulativeBound(name="c", tool="apply_discount", argument="pct")
+
+    def test_two_ceilings_are_also_refused(self):
+        with pytest.raises(ValidationError, match="exactly one of maximum and maximum_from"):
+            CumulativeBound(
+                name="c",
+                tool="apply_discount",
+                argument="pct",
+                maximum=10,
+                maximum_from=ResultReference(tool="t", field="f"),
+            )
+
+    def test_the_ceiling_is_inclusive(self):
+        bound = CumulativeBound(name="c", tool="apply_discount", argument="pct", maximum=10)
+        assert bound.permits(10, maximum=10)
+        assert not bound.permits(10.01, maximum=10)
+
+    def test_an_unresolved_ceiling_does_not_constrain(self):
+        """The detector reports that as never evaluated. This must not call it satisfied."""
+        bound = CumulativeBound(
+            name="c",
+            tool="apply_discount",
+            argument="pct",
+            maximum_from=ResultReference(tool="t", field="f"),
+        )
+        assert bound.permits(1_000_000, maximum=None)
+
+    def test_the_grouping_arguments_are_checked_against_the_schema(self):
+        bound = CumulativeBound(
+            name="c", tool="apply_discount", argument="pct", group_by=("order_id",), maximum=10
+        )
+        with pytest.raises(ValidationError, match="declares no such argument"):
+            AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+
+class TestMatchingBounds:
+    def test_a_match_is_case_folded_and_stripped(self):
+        bound = MatchingBound(
+            name="m",
+            tool="apply_discount",
+            argument="pct",
+            matches=ResultReference(tool="t", field="f"),
+        )
+        assert bound.permits(" INR ", expected="inr")
+        assert not bound.permits("USD", expected="inr")
+
+    def test_an_unresolved_expectation_does_not_constrain(self):
+        bound = MatchingBound(
+            name="m",
+            tool="apply_discount",
+            argument="pct",
+            matches=ResultReference(tool="t", field="f"),
+        )
+        assert bound.permits("anything at all", expected=None)
+
+    def test_the_source_tool_is_checked(self):
+        bound = MatchingBound(
+            name="m",
+            tool="apply_discount",
+            argument="pct",
+            matches=ResultReference(tool="nowhere", field="f"),
+        )
+        with pytest.raises(ValidationError, match="reads its limit from tool 'nowhere'"):
+            AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+
+class TestImputedBounds:
+    def test_needs_a_limit(self):
+        with pytest.raises(ValidationError, match="neither maximum nor minimum"):
+            ImputedBound(
+                name="i", tool="apply_discount", value_from=ResultReference(tool="t", field="f")
+            )
+
+    def test_it_constrains_no_argument(self):
+        """The one bound with nothing to check against a schema, which validation must allow."""
+        bound = ImputedBound(
+            name="i",
+            tool="apply_discount",
+            value_from=ResultReference(tool="verify_order", field="amount"),
+            maximum=50,
+        )
+        spec = AgentSpec(
+            config=config(
+                tools=(
+                    tool("apply_discount", Consequence.MONEY, ("pct",)),
+                    tool("verify_order", Consequence.INERT, ("order_id",)),
+                )
+            ),
+            policy=policy(bounds=(bound,)),
+        )
+        assert spec.bounds_for("apply_discount") == (bound,)
+        assert bound.constrained_arguments == ()
+        assert bound.argument == ""
+
+    def test_it_cannot_read_its_own_result(self):
+        bound = ImputedBound(
+            name="i",
+            tool="apply_discount",
+            value_from=ResultReference(tool="apply_discount", field="pct"),
+            maximum=50,
+        )
+        with pytest.raises(ValidationError, match="the tool it constrains"):
+            AgentSpec(config=config(), policy=policy(bounds=(bound,)))
+
+
+class TestResultConditions:
+    def test_needs_exactly_one_form(self):
+        with pytest.raises(ValidationError, match="exactly one of equals and equals_any"):
+            ResultCondition(field="status")
+
+    def test_two_forms_are_also_refused(self):
+        with pytest.raises(ValidationError, match="exactly one of equals and equals_any"):
+            ResultCondition(field="status", equals="delivered", equals_any=("delivered",))
+
+    def test_any_of_several_values_counts(self):
+        condition = ResultCondition(field="status", equals_any=("delivered", "cancelled"))
+        assert condition.met_by({"status": "cancelled"})
+        assert not condition.met_by({"status": "in_transit"})
+
+    def test_it_renders_the_set_for_a_verdict(self):
+        condition = ResultCondition(field="status", equals_any=("delivered", "cancelled"))
+        assert str(condition) == "status in (delivered, cancelled)"
+
+    def test_a_boolean_is_compared_as_text(self):
+        assert ResultCondition(field="ok", equals=True).met_by({"ok": True})
+
+
+class TestMatchedPreconditions:
+    def test_the_matched_argument_must_exist_on_both_tools(self):
+        precondition = Precondition(
+            name="p", tool="issue_refund", requires="verify_order", matched_by=("order_id",)
+        )
+        tools = (
+            tool("issue_refund", Consequence.MONEY, ("amount",)),
+            tool("verify_order", Consequence.INERT, ("order_id",)),
+        )
+        with pytest.raises(ValidationError, match="matches on argument 'order_id'"):
+            AgentSpec(config=config(tools=tools), policy=policy(preconditions=(precondition,)))
+
+    def test_it_is_accepted_when_both_declare_it(self):
+        precondition = Precondition(
+            name="p", tool="issue_refund", requires="verify_order", matched_by=("order_id",)
+        )
+        tools = (
+            tool("issue_refund", Consequence.MONEY, ("amount", "order_id")),
+            tool("verify_order", Consequence.INERT, ("order_id",)),
+        )
+        spec = AgentSpec(config=config(tools=tools), policy=policy(preconditions=(precondition,)))
+        assert spec.preconditions_for("issue_refund") == (precondition,)
+
+
+class TestTheNewerRequirements:
+    def test_an_idempotency_requirement_checks_every_argument_it_names(self):
+        requirement = IdempotencyRequirement(
+            name="once",
+            tool="apply_discount",
+            identity_arguments=("pct",),
+            key_argument="nowhere",
+        )
+        with pytest.raises(ValidationError, match="declares no such argument"):
+            AgentSpec(config=config(), policy=policy(idempotency=(requirement,)))
+
+    def test_an_idempotency_requirement_on_an_undeclared_tool_is_refused(self):
+        requirement = IdempotencyRequirement(
+            name="once", tool="nowhere", identity_arguments=("pct",)
+        )
+        with pytest.raises(ValidationError, match="which is not declared"):
+            AgentSpec(config=config(), policy=policy(idempotency=(requirement,)))
+
+    def test_an_outbound_rule_checks_its_body_arguments(self):
+        rule = OutboundRule(name="out", tool="send", body_arguments=("nowhere",))
+        with pytest.raises(ValidationError, match="declares no such argument"):
+            AgentSpec(
+                config=config(tools=(text_tool("send", Consequence.OBLIGATION),)),
+                policy=policy(outbound=(rule,)),
+            )
+
+    def test_a_citation_requirement_needs_a_kind_some_source_carries(self):
+        requirement = CitationRequirement(
+            name="cite",
+            tool="send",
+            argument="body",
+            identifier_kind="order_id",
+            source_tools=("read",),
+        )
+        tools = (
+            text_tool("send", Consequence.OBLIGATION),
+            text_tool("read", Consequence.DISCLOSURE, ("order_id",)),
+        )
+        with pytest.raises(ValidationError, match="no declared data source carries"):
+            AgentSpec(config=config(tools=tools), policy=policy(citations=(requirement,)))
+
+    def test_a_citation_requirement_cannot_be_its_own_source(self):
+        requirement = CitationRequirement(
+            name="cite",
+            tool="send",
+            argument="body",
+            identifier_kind="order_id",
+            source_tools=("send",),
+        )
+        sources = (DataSource(name="orders", identifier_kinds=("order_id",)),)
+        with pytest.raises(ValidationError, match="the tool it constrains"):
+            AgentSpec(
+                config=config(
+                    tools=(text_tool("send", Consequence.OBLIGATION),), data_sources=sources
+                ),
+                policy=policy(citations=(requirement,)),
+            )
+
+    def test_every_section_counts_as_a_gate(self):
+        """A tool a detector can assert something about is not an ungated one."""
+        tools = (
+            text_tool("send", Consequence.OBLIGATION),
+            tool("issue_refund", Consequence.MONEY, ("amount",)),
+        )
+        spec = AgentSpec(
+            config=config(tools=tools),
+            policy=policy(
+                outbound=(OutboundRule(name="out", tool="send", body_arguments=("body",)),)
+            ),
+        )
+        assert [t.name for t in spec.ungated_consequential_tools()] == ["issue_refund"]
+
+    def test_a_repeated_name_within_a_section_is_refused(self):
+        rule = OutboundRule(name="out", tool="send", body_arguments=("body",))
+        with pytest.raises(ValidationError, match="duplicate outbound rule name"):
+            AgentPolicy(agent_id="a", version="1", outbound=(rule, rule))
+
+    def test_every_section_is_carried_into_the_provenance_report(self):
+        rule = OutboundRule(
+            name="out", tool="send", body_arguments=("body",), provenance=Provenance.INFERRED
+        )
+        assert not AgentPolicy(agent_id="a", version="1", outbound=(rule,)).is_fully_declared

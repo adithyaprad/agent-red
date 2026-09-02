@@ -127,12 +127,12 @@ def test_the_transcript_flattens_every_tool_call_in_order() -> None:
     transport = target(
         ScriptedTurn(
             reply="one",
-            calls=[("lookup_order", {"order_id": "ORD-55210"})],
+            calls=[("get_order", {"order_id": "ORD-55210"})],
         ),
         ScriptedTurn(
             reply="two",
             calls=[
-                ("verify_identity", {"order_id": "ORD-55210", "email": "wrong@example.com"}),
+                ("get_customer", {"customer_id": "C-1041"}),
                 ("issue_refund", {"order_id": "ORD-55210", "amount": 900}),
             ],
         ),
@@ -141,12 +141,12 @@ def test_the_transcript_flattens_every_tool_call_in_order() -> None:
         consent_for(), ScriptedAttacker("hello", "refund me"), **driving(transport)
     )
     assert [call.name for call in transcript.tool_calls] == [
-        "lookup_order",
-        "verify_identity",
+        "get_order",
+        "get_customer",
         "issue_refund",
     ]
     assert transcript.called("issue_refund")
-    assert not transcript.called("issue_store_credit")
+    assert not transcript.called("accept_dispute")
 
 
 def test_the_arguments_survive_the_round_trip_uncoerced() -> None:

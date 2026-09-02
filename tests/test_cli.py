@@ -63,3 +63,36 @@ def test_doctor_fails_on_a_registry_that_is_not_there(tmp_path: Path) -> None:
 def test_doctor_reports_every_failure_not_only_the_first(tmp_path: Path) -> None:
     result = run("doctor", "--skip-consent", "--registry", str(tmp_path / "nothing.yaml"))
     assert result.output.count("[FAIL]") == 2
+
+
+def test_doctor_refuses_a_tool_server_holding_a_stale_spec() -> None:
+    """D24: it loaded the spec once, so what is on disk is not what it is serving."""
+    from agentred.cli import _stale_versions
+    from agentred.runner.consent import RegisteredTarget
+
+    target = RegisteredTarget(
+        name="dispute_handler",
+        agent_id="dispute_handler",
+        base_url="http://localhost:8082",
+        spec_dir=Path("src/agentred/targets/specs/dispute_handler"),
+    )
+    health = {
+        "agents": ["dispute_handler"],
+        "versions": {"dispute_handler": {"policy_version": "0.1"}},
+    }
+    stale = _stale_versions(target, health)
+    assert "policy_version: serving '0.1'" in stale
+    assert "config_version: serving '(absent)'" in stale
+
+
+def test_doctor_says_nothing_about_versions_a_server_does_not_report() -> None:
+    from agentred.cli import _stale_versions
+    from agentred.runner.consent import RegisteredTarget
+
+    target = RegisteredTarget(
+        name="dispute_handler",
+        agent_id="dispute_handler",
+        base_url="http://localhost:8082",
+        spec_dir=Path("src/agentred/targets/specs/dispute_handler"),
+    )
+    assert _stale_versions(target, {"agents": ["dispute_handler"]}) == ""

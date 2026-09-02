@@ -360,3 +360,80 @@ def test_a_target_that_does_not_say_where_its_tools_are_is_refused() -> None:
     transport = EchoingTransport(tool_server="")
     with pytest.raises(ChallengeFailedError, match="nowhere"):
         establish_consent("cart_recovery", registry=registry(), transport=transport)
+
+
+REAL_SPECS = Path("src/agentred/targets/specs")
+
+
+def real_registry(name: str = "dispute_handler") -> TargetRegistry:
+    """A registry pointing at a spec that is actually on disk, so versions can be compared."""
+    return TargetRegistry(
+        targets=(
+            RegisteredTarget(
+                name=name,
+                agent_id=name,
+                base_url="http://localhost:8082",
+                spec_dir=REAL_SPECS / name,
+            ),
+        )
+    )
+
+
+def live_versions(name: str = "dispute_handler") -> dict[str, str]:
+    from agentred.spec import load_spec_dir
+
+    return load_spec_dir(REAL_SPECS / name).version_tuple.model_dump(mode="json")
+
+
+class TestTheSpecTheTargetIsActuallyHolding:
+    """D24: a target reads its spec once, so what is on disk is not what is running."""
+
+    def test_matching_versions_are_accepted(self) -> None:
+        transport = EchoingTransport(agent_id="dispute_handler", versions=live_versions())
+        token = establish_consent("dispute_handler", registry=real_registry(), transport=transport)
+        assert token.is_live()
+
+    def test_a_stale_version_is_refused_before_any_turn_is_sent(self) -> None:
+        stale = {**live_versions(), "policy_version": "1.0"}
+        transport = EchoingTransport(agent_id="dispute_handler", versions=stale)
+        with pytest.raises(ChallengeFailedError, match="running a different version"):
+            establish_consent("dispute_handler", registry=real_registry(), transport=transport)
+
+    def test_the_refusal_names_the_field_both_values_and_the_fix(self) -> None:
+        stale = {**live_versions(), "config_version": "0.9"}
+        transport = EchoingTransport(agent_id="dispute_handler", versions=stale)
+        with pytest.raises(ChallengeFailedError) as raised:
+            establish_consent("dispute_handler", registry=real_registry(), transport=transport)
+        message = str(raised.value)
+        assert "config_version: running '0.9'" in message
+        assert f"on disk {live_versions()['config_version']!r}" in message
+        assert "restart it" in message
+
+    def test_a_stale_tool_digest_is_refused_too(self) -> None:
+        """The one nobody edits by hand: it is derived from the declared tools."""
+        stale = {**live_versions(), "tool_version": "sha256:000000000000"}
+        transport = EchoingTransport(agent_id="dispute_handler", versions=stale)
+        with pytest.raises(ChallengeFailedError, match="tool_version"):
+            establish_consent("dispute_handler", registry=real_registry(), transport=transport)
+
+    def test_a_target_that_reports_no_versions_is_checked_as_far_as_it_can_be(self) -> None:
+        """Refusing one for a field it never had would be refusing it for our own change."""
+        transport = EchoingTransport(agent_id="dispute_handler")
+        assert establish_consent(
+            "dispute_handler", registry=real_registry(), transport=transport
+        ).is_live()
+
+    def test_an_unreadable_spec_is_a_refusal_and_not_a_pass(self, tmp_path: Path) -> None:
+        registry = TargetRegistry(
+            targets=(
+                RegisteredTarget(
+                    name="dispute_handler",
+                    agent_id="dispute_handler",
+                    base_url="http://localhost:8082",
+                    spec_dir=tmp_path / "nothing-here",
+                ),
+            )
+        )
+        transport = EchoingTransport(agent_id="dispute_handler", versions=live_versions())
+        with pytest.raises(ChallengeFailedError, match="could not be read"):
+            establish_consent("dispute_handler", registry=registry, transport=transport)

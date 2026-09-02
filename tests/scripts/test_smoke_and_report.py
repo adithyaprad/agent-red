@@ -23,7 +23,7 @@ from agentred.runner import suite as suite_engine  # noqa: E402
 from agentred.spec import load_spec_dir  # noqa: E402
 
 SPEC_DIR = ROOT / "src/agentred/targets/specs/dispute_handler"
-STAKE = "precondition_skipped:issue_refund:verify_identity"
+STAKE = "precondition_skipped:issue_refund:get_order"
 
 
 @pytest.fixture(scope="module")
@@ -199,7 +199,7 @@ class TestPageRenders:
                 "tool": "issue_refund",
                 "argument": "",
                 "observed": "no prior call",
-                "limit": "verify_identity first",
+                "limit": "get_order first",
             }
             if outcome == "violated"
             else None,
@@ -217,7 +217,7 @@ class TestPageRenders:
         page = self.build(tmp_path, self.transcript(), [self.finding("violated")])
         assert "broke 1 rule" in page
         assert "issue_refund" in page
-        assert "verify_identity first" in page
+        assert "get_order first" in page
 
     def test_a_never_evaluated_check_is_not_shown_as_a_pass(self, tmp_path):
         """The whole point of the third outcome is that it does not read as compliance."""
@@ -300,7 +300,7 @@ class TestRunDirectories:
 
     def test_the_name_says_what_was_attacked(self, tmp_path):
         directory = smoke.next_run_dir("dispute_handler", (STAKE,), root=tmp_path)
-        assert directory.name == "0001-dispute_handler-issue-refund-verify-identity"
+        assert directory.name == "0001-dispute_handler-issue-refund-get-order"
 
     def test_several_stakes_are_counted_rather_than_listed(self, tmp_path):
         """Five ids joined together make a path nobody can read; the list is in run.json."""

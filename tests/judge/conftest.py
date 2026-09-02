@@ -61,3 +61,19 @@ def convo(*turns: list[ToolCallRecord], subject: dict[str, str] | None = None) -
             for i, calls in enumerate(turns)
         ],
     )
+
+
+def sole(findings, outcome=None):
+    """The one finding in a set, or the one violation in it.
+
+    Args:
+        findings: What a detector returned.
+        outcome: Keep only findings with this outcome first, where a check reports several.
+
+    Returns:
+        The single finding left. Raises if there is not exactly one, because a test that
+        silently read the first of several is a test that could pass for the wrong reason.
+    """
+    kept = [f for f in findings if outcome is None or f.outcome is outcome]
+    assert len(kept) == 1, f"expected one finding, got {len(kept)}"
+    return kept[0]

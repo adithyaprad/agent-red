@@ -59,10 +59,10 @@ async def test_a_call_is_recorded_with_its_full_arguments_and_its_result() -> No
     server = server_for("dispute_handler")
 
     async with connected(server, agent_id="dispute_handler", run="r1", session="s1") as client:
-        await client.call_tool("lookup_order", {"order_id": ORDER})
+        await client.call_tool("get_order", {"order_id": ORDER})
 
     recorded = server.recorder.calls("r1", "s1")
-    assert [call.name for call in recorded] == ["lookup_order"]
+    assert [call.name for call in recorded] == ["get_order"]
     assert recorded[0].arguments == {"order_id": ORDER}
     assert recorded[0].result["order_id"] == ORDER
 
@@ -73,7 +73,7 @@ async def test_the_run_and_the_session_come_from_the_url_and_not_from_the_agent(
 
     async with connected(server, agent_id="dispute_handler", run="r1", session="mine") as client:
         await client.call_tool(
-            "lookup_order", {"order_id": ORDER, "session": "somebody-else", "run": "other"}
+            "get_order", {"order_id": ORDER, "session": "somebody-else", "run": "other"}
         )
 
     assert server.recorder.calls("r1", "mine")
@@ -84,11 +84,11 @@ async def test_calls_are_recorded_in_sequence() -> None:
     server = server_for("dispute_handler")
 
     async with connected(server, agent_id="dispute_handler", run="r1", session="s1") as client:
-        await client.call_tool("lookup_order", {"order_id": ORDER})
+        await client.call_tool("get_order", {"order_id": ORDER})
         await client.call_tool("issue_refund", {"order_id": ORDER, "amount": 40})
 
     assert [(call.sequence, call.name) for call in server.recorder.calls("r1", "s1")] == [
-        (0, "lookup_order"),
+        (0, "get_order"),
         (1, "issue_refund"),
     ]
 
@@ -155,19 +155,29 @@ def test_an_agent_given_to_the_server_twice_is_refused() -> None:
 def test_calling_for_an_agent_the_server_does_not_serve_is_refused() -> None:
     server = server_for("dispute_handler")
     with pytest.raises(ToolServerError, match="does not serve"):
-        server.call(Binding("cart_recovery", "r1", "s1"), "lookup_order", {})
+        server.call(Binding("cart_recovery", "r1", "s1"), "get_order", {})
 
 
 def control_client(server: ToolServer) -> TestClient:
     return TestClient(build_control_app(server))
 
 
+def test_the_control_face_says_which_spec_it_is_serving_from() -> None:
+    """A server holds its specs for as long as it runs, so what it serves has to be visible."""
+    server = server_for("dispute_handler")
+    body = control_client(server).get("/health").json()
+    assert body["agents"] == ["dispute_handler"]
+    assert body["versions"]["dispute_handler"] == server.spec(
+        "dispute_handler"
+    ).version_tuple.model_dump(mode="json")
+
+
 def test_the_control_face_reads_the_stream_back() -> None:
     server = server_for("dispute_handler")
-    server.call(Binding("dispute_handler", "r1", "s1"), "lookup_order", {"order_id": ORDER})
+    server.call(Binding("dispute_handler", "r1", "s1"), "get_order", {"order_id": ORDER})
 
     body = control_client(server).get("/calls/r1/s1").json()
-    assert [call["name"] for call in body["calls"]] == ["lookup_order"]
+    assert [call["name"] for call in body["calls"]] == ["get_order"]
     assert body["calls"][0]["arguments"] == {"order_id": ORDER}
 
 

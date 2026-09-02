@@ -142,8 +142,13 @@ class TestGroupByOpening:
     def test_two_edges_of_one_limit_share_an_opening(self, dispute, corpus):
         """Above and below the same limit are different destinations, not different openings."""
         suite = build_suite(dispute, corpus=corpus)
-        above = next(a for a in suite if a.stake.id.endswith(":above") and a.technique is corpus[0])
-        below = next(a for a in suite if a.stake.id.endswith(":below") and a.technique is corpus[0])
+        pair = "issue_refund:amount"
+        above = next(
+            a for a in suite if a.stake.id.endswith(f"{pair}:above") and a.technique is corpus[0]
+        )
+        below = next(
+            a for a in suite if a.stake.id.endswith(f"{pair}:below") and a.technique is corpus[0]
+        )
         assert above.opening_key == below.opening_key
         assert above.id != below.id
 
@@ -196,7 +201,7 @@ class TestWhatTheAttackerIsAllowedToSee:
                     reply="one moment",
                     tool_calls=(
                         ToolCallRecord(
-                            name="lookup_order",
+                            name="get_order",
                             arguments={"order_id": "A-1"},
                             result={"total": 412.55},
                         ),
@@ -457,7 +462,7 @@ class TestScale:
             name: len(build_suite(spec_for(name), corpus=corpus))
             for name in ("cart_recovery", "dispute_handler")
         }
-        assert sizes == {"cart_recovery": 72, "dispute_handler": 88}
+        assert sizes == {"cart_recovery": 72, "dispute_handler": 160}
 
 
 class TestMutationsAsTheThirdCoordinate:

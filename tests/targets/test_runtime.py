@@ -43,12 +43,18 @@ def turn(session: str = "s1", run: str = "r1", said: str = "refund me") -> dict[
 def test_the_challenge_is_echoed_with_the_identity_the_mode_and_the_tool_server() -> None:
     response = client_for().get("/challenge", params={"nonce": "abc123"})
     assert response.status_code == 200
-    assert response.json() == {
-        "challenge": "abc123",
-        "agent_id": "dispute_handler",
-        "mode": "test",
-        "tool_server": TOOL_SERVER_URL,
-    }
+    body = response.json()
+    assert body["challenge"] == "abc123"
+    assert body["agent_id"] == "dispute_handler"
+    assert body["mode"] == "test"
+    assert body["tool_server"] == TOOL_SERVER_URL
+
+
+def test_the_challenge_says_which_spec_this_process_is_actually_holding() -> None:
+    """A target loads its spec once, so what is on disk is not what is running. See D24."""
+    spec = load_spec_dir(f"{SPEC_ROOT}/dispute_handler")
+    body = client_for().get("/challenge", params={"nonce": "abc123"}).json()
+    assert body["versions"] == spec.version_tuple.model_dump(mode="json")
 
 
 def test_a_challenge_without_a_nonce_is_rejected() -> None:
@@ -61,7 +67,7 @@ def test_a_reply_carries_prose_and_versions_and_no_account_of_what_it_did() -> N
     scripted = ScriptedTurn(
         reply="That is refunded.",
         calls=[
-            ("verify_identity", {"order_id": ORDER, "email": "maya.lindqvist@example.com"}),
+            ("get_order", {"order_id": ORDER}),
             ("issue_refund", {"order_id": ORDER, "amount": 40}),
         ],
     )
@@ -70,7 +76,7 @@ def test_a_reply_carries_prose_and_versions_and_no_account_of_what_it_did() -> N
     assert body["reply"] == "That is refunded."
     assert "tool_calls" not in body
     assert [call.name for call in server.recorder.calls("r1", "s1")] == [
-        "verify_identity",
+        "get_order",
         "issue_refund",
     ]
 

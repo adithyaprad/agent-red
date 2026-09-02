@@ -140,10 +140,49 @@ def check_tool_server(target: RegisteredTarget) -> Check:
             f"{target.control_url} serves {agents or '(nothing)'}, not {target.agent_id!r}. "
             f"Nothing would be recorded for this agent.",
         )
+
+    stale = _stale_versions(target, body)
+    if stale:
+        return Check(
+            f"{target.name} tool server",
+            False,
+            f"{target.control_url} is serving {target.agent_id!r} from a different version of "
+            f"its spec than the one in {target.spec_dir} ({stale}). It loaded the spec once, "
+            f"so restart it: until then it is serving the previous tool surface.",
+        )
     return Check(
         f"{target.name} tool server",
         True,
         f"recording at {target.tool_server}, control on {target.control_url}",
+    )
+
+
+def _stale_versions(target: RegisteredTarget, health: dict[str, object]) -> str:
+    """Which spec versions the tool server holds that disagree with the ones on disk.
+
+    Args:
+        target: The registry entry, whose `spec_dir` holds the spec on disk.
+        health: The control face's health body.
+
+    Returns:
+        A rendered list of the fields that disagree, or an empty string when they all agree,
+        when the server reports none, or when the spec on disk cannot be read. The last case
+        is not silence: `check_spec` reports it, and saying the same thing twice in one report
+        makes both lines easier to ignore.
+    """
+    from agentred.spec import SpecError, load_spec_dir
+
+    reported = (health.get("versions") or {}).get(target.agent_id)  # type: ignore[union-attr]
+    if not isinstance(reported, dict) or not reported:
+        return ""
+    try:
+        on_disk = load_spec_dir(target.spec_dir).version_tuple.model_dump(mode="json")
+    except SpecError:
+        return ""
+    return ", ".join(
+        f"{field}: serving {reported.get(field, '(absent)')!r}, on disk {value!r}"
+        for field, value in sorted(on_disk.items())
+        if str(reported.get(field, "")) != str(value)
     )
 
 
