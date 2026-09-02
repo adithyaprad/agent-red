@@ -233,7 +233,7 @@ def undeclared_section(analysis: dict[str, Any]) -> str:
     return (
         '<section class="block"><h2>Rules you told your agent that your policy does not carry</h2>'
         "<p>Read out of your own instructions and compared against your declared policy. "
-        "Nothing was checking these.</p>" + "".join(rows) + "</section>"
+        "Nothing in your setup was enforcing these.</p>" + "".join(rows) + "</section>"
     )
 
 
@@ -395,8 +395,8 @@ def build(analysis: dict[str, Any]) -> str:
     disclosures = sum(1 for _, f in found if f["kind"].startswith("obligation:disclosure"))
     unchecked = any(f.get("provenance") == "inferred" for _, f in found)
     caveat = (
-        " Some of these rules are in your prompt and not in your policy, so nothing was "
-        "checking them."
+        " Some of these rules are in your prompt and not in your policy, so nothing in your "
+        "setup was enforcing them."
         if unchecked
         else ""
     )

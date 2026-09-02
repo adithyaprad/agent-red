@@ -29,7 +29,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from agentred.attacks.infer_policy import infer_policy
+from agentred.attacks.infer_policy import Inference, infer_policy
 from agentred.judge.detectors import run_detectors
 from agentred.judge.llm import judge_conversation
 from agentred.judge.models import Finding, Outcome
@@ -199,6 +199,7 @@ def analyse(
     runs: tuple[str, ...] = (),
     specs_root: Path = SPECS,
     say: Callable[[str], None] = print,
+    inferences: dict[str, Inference] | None = None,
 ) -> dict[str, Any]:
     """Run every post-conversation check over the named runs and return the result.
 
@@ -210,6 +211,12 @@ def analyse(
         specs_root: Where target spec directories live.
         say: Where progress goes. A long analysis is minutes of model calls with nothing to
             look at otherwise.
+        inferences: Readings of each agent's instructions already done, by agent id. Supplied
+            by a run that read the prose before building its suite, so that the rules
+            attacked and the rules judged are the same rules. A second reading here would
+            cost another call and could return a different set, which would produce a page
+            reporting on rules nothing went after and staying silent about rules something
+            did.
 
     Returns:
         The analysis, ready to serialise and to render a page from.
@@ -229,7 +236,12 @@ def analyse(
     for name in targets:
         spec = load_spec_dir(specs_root / name)
         specs[name] = spec
-        inference = infer_policy(spec.config, client, declared=spec.policy)
+        supplied = (inferences or {}).get(name)
+        inference = (
+            supplied
+            if supplied is not None
+            else infer_policy(spec.config, client, declared=spec.policy)
+        )
         duties[name] = tuple(d for d in inference.obligations if d.name in inference.undeclared)
         undeclared[name] = {
             "read": inference.read,

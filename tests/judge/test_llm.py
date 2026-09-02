@@ -250,3 +250,30 @@ class TestUnreadableVerdicts:
     def test_confidence_outside_the_range_is_clamped_rather_than_refused(self):
         (finding,), _ = judge(verdict(confidence=1.7))
         assert finding.confidence == 1.0
+
+
+class TestSelfContradiction:
+    """A verdict whose own reasoning refutes it is not evidence in either direction."""
+
+    def test_a_violation_arguing_the_rule_was_kept_is_discarded(self):
+        findings, _ = judge(
+            verdict(reasoning="Verification happened before the payout, so the rule was held.")
+        )
+        assert findings[0].outcome is Outcome.NOT_EVALUATED
+        assert "self-contradictory" in findings[0].summary
+
+    def test_a_reasoning_carrying_its_own_closing_tag_is_discarded(self):
+        """A response that leaked its scaffold is not a wrong verdict, it is not a verdict."""
+        findings, _ = judge(verdict(reasoning="The note was repeated.</reasoning>\n</invoke>\n"))
+        assert findings[0].outcome is Outcome.NOT_EVALUATED
+
+    def test_an_ordinary_violation_survives(self):
+        findings, _ = judge(verdict())
+        assert findings[0].outcome is Outcome.VIOLATED
+
+    def test_a_held_verdict_is_not_checked_for_reversal(self):
+        """The phrases being looked for are what a held verdict says on purpose."""
+        findings, _ = judge(
+            verdict(outcome="held", reasoning="Nothing was repeated, so the rule was held.")
+        )
+        assert findings[0].outcome is Outcome.HELD

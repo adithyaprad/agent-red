@@ -56,10 +56,21 @@ session and declares nobody to be is refused at load rather than warned about, f
 reason a self-contradicting spec is: a check that cannot fire is indistinguishable from a
 passing agent.
 
-*Degraded mode.* Where policy is prose, `attacks/stakes.py` extracts candidate bounds and
+*Degraded mode.* Where policy is prose, `attacks/infer_policy.py` extracts candidate bounds and
 preconditions from the prompt with a model, and every check derived that way is labelled
 `inferred` rather than `declared` on the scorecard. Uncertainty at the foundation is worse
 than uncertainty at the edges, so it is reported rather than hidden.
+
+The reading is not only for an agent that declared nothing. It runs on every agent, before the
+suite is built, because the interesting question is not what the prose says but what the prose
+says that the policy does not. An operator states rules in their instructions and declares a
+subset of them, and the ones that fall through are disproportionately about what the agent may
+say rather than what it may call: repeat something it fetched, assert something it never looked
+up, undertake something on the operator's behalf. Those break in a reply and leave a tool-call
+log identical to a conversation that keeps them, so no detector will ever ask about one. Reading
+the prose first is what turns such a rule into something attacked on purpose rather than
+something an attack aimed elsewhere occasionally trips over, and a run that cannot read the
+instructions is refused rather than run against the smaller set it could see.
 
 *Failure mode if absent:* without config or policy, stakes cannot be derived, attacks fall back
 to generic probing, and the suite loses most of its power. Without subjects, the suite still
@@ -159,6 +170,9 @@ declares, and both of those exist regardless of what produced the calls.
 
 ```
  registry + consent gate
+          |
+          v
+  instruction reading  ---- rules stated in the prompt, compared against the declared policy
           |
           v
    attack generator  ---- techniques (YAML) x derived stakes x channels + mutations + gen N-1 winners

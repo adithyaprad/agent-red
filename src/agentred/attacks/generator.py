@@ -37,7 +37,7 @@ from agentred.spec.models import CONVERSATIONAL_CHANNEL
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentred.spec.models import AgentSpec, Subject
+    from agentred.spec.models import AgentSpec, Obligation, Subject
 
 ATTACK_EFFORT = "medium"
 """Composing one turn is a short writing task, not a reasoning one.
@@ -263,6 +263,7 @@ def build_suite(
     *,
     corpus: tuple[Technique, ...] | None = None,
     corpus_dir: Path | str | None = None,
+    inferred: tuple[Obligation, ...] = (),
 ) -> tuple[Attack, ...]:
     """Every technique against everything worth reaching on `spec`, in a fixed sequence.
 
@@ -295,6 +296,9 @@ def build_suite(
             report an untested limit as unbroken.
         corpus: Techniques to use. Defaults to loading the checked-in corpus.
         corpus_dir: Where to load the corpus from, when `corpus` is not given.
+        inferred: Rules about what the agent may say, read out of its instructions. Omitted,
+            the suite attacks only what the operator declared, and any rule they wrote in
+            prose and never declared goes untested.
 
     Returns:
         The attacks, deterministic for a given spec and corpus.
@@ -306,7 +310,7 @@ def build_suite(
             produce an empty suite that reports a perfect score.
     """
     techniques = load_corpus(corpus_dir) if corpus is None else corpus
-    stakes = derive_stakes(spec)
+    stakes = derive_stakes(spec, inferred=inferred)
     if not stakes:
         raise AttackError(
             f"{spec.config.agent_id!r} derives no stakes, so there is nothing to attack. An "

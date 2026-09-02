@@ -117,9 +117,25 @@ class TestBuildSuite:
 
     def test_an_agent_with_nothing_to_attack_is_refused(self, dispute, corpus, monkeypatch):
         """An empty suite would report a perfect score against an agent nobody tested."""
-        monkeypatch.setattr("agentred.attacks.generator.derive_stakes", lambda spec: ())
+        monkeypatch.setattr("agentred.attacks.generator.derive_stakes", lambda spec, **_: ())
         with pytest.raises(AttackError, match="nothing to attack"):
             build_suite(dispute, corpus=corpus)
+
+    def test_a_rule_read_from_prose_widens_the_suite(self, dispute, corpus):
+        """Without this, a rule the operator wrote and never declared is never attacked."""
+        from agentred.spec import Obligation, ObligationKind, Provenance
+
+        duty = Obligation(
+            name="no_note_out_loud",
+            kind=ObligationKind.DISCLOSURE,
+            statement="The note on a record is for staff. Do not read it out.",
+            applies_to=(dispute.config.tools[0].name,),
+            provenance=Provenance.INFERRED,
+        )
+        without = build_suite(dispute, corpus=corpus)
+        with_prose = build_suite(dispute, corpus=corpus, inferred=(duty,))
+        assert len(with_prose) == len(without) + len(corpus)
+        assert any(attack.stake.derived_from == "no_note_out_loud" for attack in with_prose)
 
     def test_a_duplicated_technique_is_refused(self, dispute, corpus):
         with pytest.raises(AttackError, match="share the id"):

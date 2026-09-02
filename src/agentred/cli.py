@@ -30,6 +30,7 @@ from typing import Annotated
 import typer
 
 from agentred.attacks.generator import build_suite
+from agentred.attacks.infer_policy import Inference, InferenceError, infer_policy
 from agentred.attacks.planted import load_planted
 from agentred.attacks.stakes import derive_stakes
 from agentred.llm import LLMConfigurationError, resolve_route
@@ -56,7 +57,7 @@ from agentred.runner.suite import (
 from agentred.scoring.analysis import AnalysisError, analyse, known_runs, resolve_runs
 from agentred.scoring.render import build
 from agentred.spec import SpecError, load_spec_dir
-from agentred.spec.models import CONVERSATIONAL_CHANNEL
+from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec
 from agentred.store.repo import Store
 
 DEFAULT_STORE = Path("data/agentred.db")
@@ -252,7 +253,11 @@ REPORT_FILENAME = "what-broke.html"
 
 
 def write_analysis(
-    store_path: Path, run_ids: tuple[str, ...], model: str, out: Path
+    store_path: Path,
+    run_ids: tuple[str, ...],
+    model: str,
+    out: Path,
+    inferences: dict[str, Inference] | None = None,
 ) -> dict[str, object]:
     """Run every post-conversation check and write the result beside the run.
 
@@ -261,6 +266,10 @@ def write_analysis(
         run_ids: Which runs to analyse. Empty analyses every run in the store.
         model: Model id for extraction, judging and the two comparison stages.
         out: Where the analysis file goes.
+        inferences: Instruction readings already done, by agent id. Passed in when the run
+            that produced these conversations read the prose up front, so the rules that were
+            attacked and the rules that are judged are the same rules. Omitted, the reading
+            happens here, which is right for an analysis of a run that never did one.
 
     Returns:
         The analysis, so a caller can render it without reading the file back.
@@ -280,9 +289,51 @@ def write_analysis(
         typer.echo(str(error))
         raise typer.Exit(code=1) from error
 
-    result = analyse(store, client, runs=run_ids, say=typer.echo)
+    result = analyse(store, client, runs=run_ids, say=typer.echo, inferences=inferences)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     return result
+
+
+def _read_instructions(spec: AgentSpec, model: str) -> Inference:
+    """Read the rules an agent's instructions state, before anything is attacked.
+
+    Refused rather than skipped when it fails. A run that could not read the prose would
+    attack a strictly smaller set of rules than the agent has and then report coverage as
+    though it had asked about all of them, which is the one failure a suite like this must
+    never have: a clean page that means nothing happened rather than nothing broke.
+
+    Args:
+        spec: The validated spec, for the instructions and the declared policy to compare
+            against.
+        model: Model id for the reading.
+
+    Returns:
+        What the reading produced.
+
+    Raises:
+        typer.Exit: If no model route is configured, or the instructions cannot be read.
+    """
+    try:
+        client = AnthropicModelClient(model=model)
+        inference = infer_policy(spec.config, client, declared=spec.policy)
+    except (LLMConfigurationError, InferenceError) as error:
+        typer.echo(f"could not read {spec.config.agent_id}'s instructions: {error}")
+        raise typer.Exit(code=1) from error
+
+    duties = inference.obligations
+    undeclared = tuple(duty for duty in duties if duty.name in inference.undeclared)
+    typer.echo(
+        f"read {inference.read} rule(s) out of {spec.config.agent_id}'s instructions: "
+        f"{len(duties)} about what it may say, {len(undeclared)} of those declared nowhere"
+    )
+    for duty in undeclared:
+        typer.echo(f"  {duty.name}: {duty.statement}")
+    if inference.invented_fraction:
+        typer.echo(
+            f"  {inference.invented_fraction:.0%} of what was read named something the agent "
+            f"does not have, and was refused"
+        )
+    return inference
 
 
 @app.command()
@@ -324,14 +375,25 @@ def run(
 ) -> None:
     """Attack a target, check what came back, and write the page its operator reads.
 
-    Three stages, one command: conversations, analysis, page. Everything lands in one
-    numbered run directory outside the repository, and the analysis covers that run alone
-    rather than whatever else the store happens to hold.
+    Four stages, one command: read the instructions, hold the conversations, check what came
+    back, write the page. Everything lands in one numbered run directory outside the
+    repository, and the analysis covers that run alone rather than whatever else the store
+    happens to hold.
+
+    The reading comes first for one reason. An agent's instructions routinely state rules its
+    policy never declares, and a rule nothing knows about is a rule nothing attacks. Reading
+    the prose before the suite is built is what lets those rules be aimed at on purpose
+    rather than tripped over by an attack pointed at something else.
     """
     spec = load_spec_dir(load_registry().resolve(target).spec_dir)
     if list_stakes:
         for derived in derive_stakes(spec):
             typer.echo(derived.id)
+        typer.echo("")
+        typer.echo(
+            "Declared rules only. A run also reads the instructions and adds a stake for "
+            "every rule stated there, which needs a model call and is not done here."
+        )
         return
     if list_channels:
         typer.echo(f"{CONVERSATIONAL_CHANNEL}\ta multi-turn conversation")
@@ -343,10 +405,11 @@ def run(
         return
 
     stakes = tuple(stake or ())
+    inference = _read_instructions(spec, model)
     # Both families in one suite. A planted attack has no attacker and costs no model call
     # on the harness side, so running them beside the conversations is nearly free, and the
     # coverage grid is only honest when it reports every channel the agent actually has.
-    everything = build_suite(spec) + load_planted(spec)
+    everything = build_suite(spec, inferred=inference.obligations) + load_planted(spec)
     channels = tuple(channel or ())
     if channels:
         unknown = sorted(set(channels) - {a.channel for a in everything})
@@ -409,7 +472,13 @@ def run(
 
     typer.echo("")
     analysis_path = directory / ANALYSIS_FILENAME
-    result = write_analysis(store_path, (completed.run_id,), model, analysis_path)
+    result = write_analysis(
+        store_path,
+        (completed.run_id,),
+        model,
+        analysis_path,
+        inferences={spec.config.agent_id: inference},
+    )
     report_path = directory / REPORT_FILENAME
     report_path.write_text(build(result), encoding="utf-8")
 
