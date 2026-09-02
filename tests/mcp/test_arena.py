@@ -177,3 +177,33 @@ def test_forgetting_a_session_drops_its_world_and_its_checkpoints() -> None:
 
     assert not arena.knows("s1")
     assert arena.world("s1").ledger == []
+
+
+def test_the_cohort_names_every_record_in_the_collection() -> None:
+    arena = Arena()
+    arena.world("s1")
+    found = arena.subjects("s1", collection="carts", kinds=("cart_id", "customer_id"))
+
+    assert len(found) == len(arena.world("s1").carts)
+    assert all(set(entry) <= {"cart_id", "customer_id"} for entry in found)
+
+
+def test_a_record_carrying_none_of_the_declared_kinds_is_left_out() -> None:
+    arena = Arena()
+    arena.world("s1")
+    found = arena.subjects("s1", collection="carts", kinds=("nothing_carries_this",))
+    assert found == ()
+
+
+def test_reading_a_cohort_before_the_world_exists_is_refused() -> None:
+    # Seeding here would answer with an empty shop, and an empty cohort places nothing in
+    # scope. The check would then pass on an agent that reached anybody at all.
+    with pytest.raises(UnknownSessionError):
+        Arena().subjects("never-seen", collection="carts", kinds=("cart_id",))
+
+
+def test_a_cohort_can_only_be_read_from_a_collection_this_world_holds() -> None:
+    arena = Arena()
+    arena.world("s1")
+    with pytest.raises(PlantError):
+        arena.subjects("s1", collection="discount_codes", kinds=("code",))

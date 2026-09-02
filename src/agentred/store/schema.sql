@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- written before channels existed was.
     channel         TEXT NOT NULL DEFAULT 'conversation',
     planted_json    TEXT NOT NULL DEFAULT '[]',
+    -- Every subject a scheduled firing was legitimately woken about, beyond the one the
+    -- attempt is named for. Empty for a conversation, which is with one person. Without it
+    -- a batch agent's every other record reads back as a stranger it should not have
+    -- reached.
+    cohort_json     TEXT NOT NULL DEFAULT '[]',
     created_at      TEXT NOT NULL
 );
 

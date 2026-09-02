@@ -139,6 +139,13 @@ class Transcript:
             as what it was rather than as a channel nobody named.
         planted: Fields written into the world before the agent ran. Empty for a
             conversational attempt.
+        cohort: Every subject this attempt was legitimately about, beyond the one it is
+            named for. Empty for a conversation, which is with one person and where one
+            subject is the whole truth. Filled for a scheduled firing, where the agent is
+            woken about a set: a recovery agent's job when its timer fires is every basket
+            nobody checked out, and a scope check that knew only one of them would score
+            the rest as records the agent should not have reached. Read from the world at
+            firing time, never from the agent's own selection call.
     """
 
     target: str
@@ -150,6 +157,7 @@ class Transcript:
     stopped_because: str = ""
     channel: str = CONVERSATIONAL_CHANNEL
     planted: tuple[PlantedField, ...] = ()
+    cohort: tuple[dict[str, str], ...] = ()
 
     @property
     def messages(self) -> list[dict[str, str]]:

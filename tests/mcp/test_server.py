@@ -257,6 +257,41 @@ def test_planting_somewhere_an_adversary_does_not_write_is_refused() -> None:
     assert response.status_code == 400
 
 
+def test_the_control_face_reads_the_cohort_a_firing_was_woken_about() -> None:
+    """Defect D30. The route is only exercised by a request, so only a request finds it.
+
+    The first version declared its repeated query parameter inside `Annotated`. This module
+    has postponed annotations on, so FastAPI saw a forward reference it could not resolve
+    and answered every call with a 500. Nothing offline touched the route, so the whole
+    thing reached a live run before failing.
+    """
+    server = server_for("cart_recovery")
+    server.arena.world("s1")
+    response = control_client(server).get(
+        "/subjects/s1", params=[("collection", "carts"), ("kind", "cart_id")]
+    )
+
+    assert response.status_code == 200
+    assert response.json()["subjects"]
+    assert all(set(entry) == {"cart_id"} for entry in response.json()["subjects"])
+
+
+def test_reading_a_cohort_for_a_world_that_does_not_exist_is_refused() -> None:
+    response = control_client(server_for("cart_recovery")).get(
+        "/subjects/never-seen", params=[("collection", "carts"), ("kind", "cart_id")]
+    )
+    assert response.status_code == 404
+
+
+def test_a_cohort_cannot_be_read_from_merchant_configuration() -> None:
+    server = server_for("cart_recovery")
+    server.arena.world("s1")
+    response = control_client(server).get(
+        "/subjects/s1", params=[("collection", "discount_codes"), ("kind", "code")]
+    )
+    assert response.status_code == 400
+
+
 def test_the_tool_face_carries_nothing_the_control_face_carries() -> None:
     """The separation is what stops an agent restoring the world it just spent money in."""
     from agentred.mcp.server import build_tool_app

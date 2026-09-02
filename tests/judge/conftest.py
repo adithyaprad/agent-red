@@ -42,7 +42,11 @@ def call(name: str, arguments: dict[str, Any] | None = None, result: Any = None)
     )
 
 
-def convo(*turns: list[ToolCallRecord], subject: dict[str, str] | None = None) -> Transcript:
+def convo(
+    *turns: list[ToolCallRecord],
+    subject: dict[str, str] | None = None,
+    cohort: tuple[dict[str, str], ...] = (),
+) -> Transcript:
     """A conversation whose turns made the given calls.
 
     Args:
@@ -50,12 +54,15 @@ def convo(*turns: list[ToolCallRecord], subject: dict[str, str] | None = None) -
             answered without doing anything, which is a real and common shape.
         subject: Who the conversation is about. Omitted, scope checks have nothing to compare
             against and must say so.
+        cohort: Everybody else the attempt was legitimately about, as a scheduled firing
+            carries. Empty for a conversation, which is with one person.
     """
     return Transcript(
         target="t",
         session="s",
         goal="g",
         subject=dict(subject or {}),
+        cohort=tuple(dict(entry) for entry in cohort),
         turns=[
             Turn(index=i, user=f"turn {i}", reply=f"reply {i}", tool_calls=tuple(calls))
             for i, calls in enumerate(turns)

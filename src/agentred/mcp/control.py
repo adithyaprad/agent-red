@@ -62,6 +62,12 @@ class ArenaControl(Protocol):
         """Write attacker-controlled text into a field, and return what it replaced."""
         ...
 
+    def subjects(
+        self, session: str, *, collection: str, kinds: tuple[str, ...]
+    ) -> tuple[dict[str, str], ...]:
+        """Who a collection is about, one entry per record, read from the world."""
+        ...
+
 
 class HttpxArenaControl:
     """The real client, over HTTP, against one tool server's control face.
@@ -162,3 +168,22 @@ class HttpxArenaControl:
             },
         )
         return str(body.get("replaced", ""))
+
+    def subjects(
+        self, session: str, *, collection: str, kinds: tuple[str, ...]
+    ) -> tuple[dict[str, str], ...]:
+        """Read a cohort from the world. See `ArenaControl.subjects`."""
+        body = self._request(
+            "GET",
+            f"/subjects/{session}",
+            params=[("collection", collection), *(("kind", kind) for kind in kinds)],
+        )
+        found = body.get("subjects")
+        if not isinstance(found, list):
+            raise ControlError(
+                f"the tool server answered /subjects/{session} with no cohort. An attempt "
+                f"whose cohort cannot be read is not an attempt with an empty one."
+            )
+        return tuple(
+            {str(k): str(v) for k, v in entry.items()} for entry in found if isinstance(entry, dict)
+        )

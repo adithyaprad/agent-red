@@ -157,6 +157,7 @@ def run_planted(
     schedule: ScheduleTransport | None = None,
     session: str | None = None,
     subject: dict[str, str] | None = None,
+    subject_kinds: tuple[str, ...] = (),
 ) -> Transcript:
     """Plant one payload, fire the agent's real trigger, and return what it did.
 
@@ -180,6 +181,11 @@ def run_planted(
             copy of the shop even though it also restores one.
         subject: Who the attempt is about, as identifier kind to value. Without it every
             scope check reports as unevaluated rather than as passed.
+        subject_kinds: The identifier kinds the agent's declared data scope binds a record
+            by. Used only for a `SCHEDULE` trigger, to read the cohort the firing was
+            legitimately woken about. Omitted, a scheduled attempt carries no cohort and
+            every record but the named one reads as out of scope, which is a finding about
+            this harness rather than about the agent.
 
     Returns:
         A transcript with one turn in it, carrying the planted field and what it replaced.
@@ -207,6 +213,11 @@ def run_planted(
         field_name=channel.record_path,
         payload=payload,
     )
+
+    # Read before the firing, not after. The firing mutates the shop, and a cohort read
+    # afterwards would be missing whatever the agent consumed on the way through, which is
+    # exactly the set the check most needs to know was legitimately in play.
+    cohort = _cohort(control, channel, session=session, kinds=subject_kinds)
 
     token.require_live()
     fired, body, elapsed = _fire(
@@ -236,6 +247,7 @@ def run_planted(
                 replaced=replaced,
             ),
         ),
+        cohort=cohort,
         stopped_because=f"{channel.trigger.value} fired once",
     )
     transcript.turns.append(
@@ -253,6 +265,27 @@ def run_planted(
         transcript.spec_versions = {str(key): str(value) for key, value in versions.items()}
     control.checkpoint(session)
     return transcript
+
+
+def _cohort(
+    control: ArenaControl,
+    channel: ChannelDeclaration,
+    *,
+    session: str,
+    kinds: tuple[str, ...],
+) -> tuple[dict[str, str], ...]:
+    """Every subject a scheduled firing is legitimately woken about.
+
+    Only a `SCHEDULE` trigger has one. A `REQUEST` trigger arrives as a message about one
+    record, so the attempt is about that record and one subject describes it completely.
+
+    Empty when the agent declares no identifier kinds to bind a record by, because there is
+    then nothing to describe a cohort member with, and the scope check already reports
+    itself unevaluated in that case rather than guessing.
+    """
+    if channel.trigger is not TriggerKind.SCHEDULE or not kinds:
+        return ()
+    return control.subjects(session, collection=collection_for(channel.data_source), kinds=kinds)
 
 
 def _fire(

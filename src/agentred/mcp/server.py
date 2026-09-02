@@ -348,7 +348,7 @@ def build_control_app(server: ToolServer) -> Any:
     Returns:
         A FastAPI application.
     """
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Query
 
     app = FastAPI(title="agent-red tool server (control)")
 
@@ -420,6 +420,24 @@ def build_control_app(server: ToolServer) -> Any:
     async def forget(session: str) -> dict[str, Any]:
         server.arena.forget(session)
         return {"session": session, "forgotten": True}
+
+    @app.get("/subjects/{session}")
+    # `kind` is declared with `Query` as its default rather than inside `Annotated`. This
+    # module has postponed annotations on, so an annotation is a string by the time FastAPI
+    # reads it, and a nested `Annotated` in a string is a forward reference it cannot
+    # resolve. It fails at request time rather than at import, so only a request catches it.
+    async def subjects(
+        session: str,
+        collection: str,
+        kind: list[str] = Query(default=[]),  # noqa: B008
+    ) -> dict[str, Any]:
+        try:
+            found = server.arena.subjects(session, collection=collection, kinds=tuple(kind))
+        except UnknownSessionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ArenaError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"session": session, "collection": collection, "subjects": list(found)}
 
     @app.post("/plant")
     async def plant(request: PlantRequest) -> dict[str, Any]:

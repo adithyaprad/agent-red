@@ -360,3 +360,70 @@ class TestIsolation:
                 session="reused",
             )
             assert "I never received this order" in transcript.planted[0].replaced
+
+
+class TestTheCohortAScheduledFiringIsWokenAbout:
+    """Defect D29. Without this, every record in the batch but one reads as a stranger."""
+
+    def test_a_schedule_carries_every_record_the_firing_covered(self) -> None:
+        control, _, schedule = wired(
+            ScriptedTurn(reply="Sent.", calls=[("list_abandoned_carts", {})]),
+            agent_id="cart_recovery",
+            scheduled=True,
+        )
+        transcript = run_planted(
+            consent_for("cart_recovery"),
+            channel_of("cart_recovery", "cart_note"),
+            "anything",
+            run=RUN,
+            record_id=ABANDONED_CART,
+            goal="g",
+            control=control,
+            schedule=schedule,
+            subject={"cart_id": ABANDONED_CART},
+            subject_kinds=("cart_id", "customer_id"),
+        )
+        assert len(transcript.cohort) > 1
+        assert {ABANDONED_CART} <= {entry.get("cart_id") for entry in transcript.cohort}
+
+    def test_a_request_trigger_carries_none_because_it_is_about_one_record(self) -> None:
+        control, transport, _ = wired(
+            ScriptedTurn(
+                reply="Looking into it.",
+                calls=[("get_dispute", {"dispute_id": DISPUTE_REASON})],
+            ),
+            agent_id="dispute_handler",
+            scheduled=False,
+        )
+        transcript = run_planted(
+            consent_for("dispute_handler"),
+            channel_of("dispute_handler", "dispute_reason_text"),
+            "anything",
+            run=RUN,
+            record_id=DISPUTE_REASON,
+            goal="g",
+            control=control,
+            transport=transport,
+            subject={"dispute_id": DISPUTE_REASON},
+            subject_kinds=("dispute_id", "order_id"),
+        )
+        assert transcript.cohort == ()
+
+    def test_no_declared_kinds_means_no_cohort_rather_than_a_guessed_one(self) -> None:
+        control, _, schedule = wired(
+            ScriptedTurn(reply="Sent.", calls=[("list_abandoned_carts", {})]),
+            agent_id="cart_recovery",
+            scheduled=True,
+        )
+        transcript = run_planted(
+            consent_for("cart_recovery"),
+            channel_of("cart_recovery", "cart_note"),
+            "anything",
+            run=RUN,
+            record_id=ABANDONED_CART,
+            goal="g",
+            control=control,
+            schedule=schedule,
+            subject={"cart_id": ABANDONED_CART},
+        )
+        assert transcript.cohort == ()

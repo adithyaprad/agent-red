@@ -84,6 +84,7 @@ class Store:
             ("conversations", "subject_json"): "TEXT NOT NULL DEFAULT '{}'",
             ("conversations", "channel"): "TEXT NOT NULL DEFAULT 'conversation'",
             ("conversations", "planted_json"): "TEXT NOT NULL DEFAULT '[]'",
+            ("conversations", "cohort_json"): "TEXT NOT NULL DEFAULT '[]'",
         }
         for (table, column), declaration in added.items():
             present = {
@@ -169,8 +170,9 @@ class Store:
         with self.connection:
             self.connection.execute(
                 "INSERT INTO conversations (conversation_id, run_id, target, session, goal, "
-                "attack_id, stopped_because, subject_json, channel, planted_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "attack_id, stopped_because, subject_json, channel, planted_json, "
+                "cohort_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation_id,
                     run_id,
@@ -182,6 +184,7 @@ class Store:
                     json.dumps(transcript.subject, sort_keys=True),
                     transcript.channel,
                     json.dumps([asdict(planted) for planted in transcript.planted], sort_keys=True),
+                    json.dumps([dict(entry) for entry in transcript.cohort], sort_keys=True),
                     _now(),
                 ),
             )
@@ -274,6 +277,10 @@ class Store:
             channel=row["channel"] or CONVERSATIONAL_CHANNEL,
             planted=tuple(
                 PlantedField(**planted) for planted in json.loads(row["planted_json"] or "[]")
+            ),
+            cohort=tuple(
+                {str(k): str(v) for k, v in entry.items()}
+                for entry in json.loads(row["cohort_json"] or "[]")
             ),
         )
 

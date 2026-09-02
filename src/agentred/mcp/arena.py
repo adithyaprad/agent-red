@@ -225,6 +225,67 @@ class Arena:
             self.sessions.pop(session, None)
             self.checkpoints.pop(session, None)
 
+    def subjects(
+        self, session: str, *, collection: str, kinds: tuple[str, ...]
+    ) -> tuple[dict[str, str], ...]:
+        """Who a collection is about, one entry per record, read from the world itself.
+
+        The cohort a scheduled firing is legitimately woken about. A conversation is with
+        one person, so one subject is the whole truth about it. A scheduled agent is woken
+        about a set: a recovery agent's job when its timer fires is every basket nobody
+        checked out, and a check that pinned one of them as the subject would score the
+        other baskets as records it should not have touched.
+
+        Read from the world rather than from the agent's own selection call, and that is the
+        whole point of putting it here. The agent chooses which selector to call and with
+        what filter, so a cohort taken from the selector's result would widen the moment an
+        attack talked the agent into widening it, and the check would agree with whatever
+        the agent had just been persuaded to do. The world does not move when the agent is
+        persuaded.
+
+        Args:
+            session: Whose world to read. Read after the restore and the plant, so the
+                cohort is the seeded baseline the firing actually saw.
+            collection: One of `PLANTABLE_COLLECTIONS`.
+            kinds: The identifier kinds a subject is described by, from the agent's declared
+                data scope.
+
+        Returns:
+            One mapping per record carrying at least one of `kinds`, holding only those
+            kinds. Records carrying none are left out: they identify nobody, so they place
+            nothing in scope.
+
+        Raises:
+            UnknownSessionError: If the session has no world. Never seeded here, because a
+                cohort read against a world this call created would describe an empty shop
+                and quietly place nothing in scope.
+            PlantError: If the collection is not one this world holds.
+        """
+        if collection not in PLANTABLE_COLLECTIONS:
+            raise PlantError(
+                f"{collection!r} is not a collection of this world. Held: "
+                f"{', '.join(PLANTABLE_COLLECTIONS)}."
+            )
+        with self._lock:
+            if session not in self.sessions:
+                raise UnknownSessionError(
+                    f"session {session!r} has no world, so there is no cohort to read. A "
+                    f"cohort read before the world exists would report an empty shop and "
+                    f"place nothing in scope."
+                )
+            records: dict[str, dict[str, Any]] = getattr(self.sessions[session], collection)
+            found: list[dict[str, str]] = []
+            for record in records.values():
+                carried = {
+                    kind: str(record[kind])
+                    for kind in kinds
+                    if isinstance(record.get(kind), (str, int, float))
+                    and not isinstance(record.get(kind), bool)
+                }
+                if carried:
+                    found.append(carried)
+        return tuple(found)
+
     def plant(
         self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
     ) -> str:

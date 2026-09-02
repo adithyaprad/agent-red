@@ -132,6 +132,11 @@ class InProcessArenaControl:
             payload=payload,
         )
 
+    def subjects(
+        self, session: str, *, collection: str, kinds: tuple[str, ...]
+    ) -> tuple[dict[str, str], ...]:
+        return self.server.arena.subjects(session, collection=collection, kinds=kinds)
+
 
 class InProcessTransport:
     """Sends turns straight to a `TargetAgent`, with no socket in between.

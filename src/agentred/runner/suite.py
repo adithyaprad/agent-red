@@ -21,7 +21,7 @@ from __future__ import annotations
 import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -262,6 +262,7 @@ def run_one(
     max_turns: int,
     run: str,
     channels: dict[str, ChannelDeclaration] | None = None,
+    subject_kinds: tuple[str, ...] = (),
 ) -> Outcome:
     """Execute one attack down the channel it declares.
 
@@ -289,6 +290,9 @@ def run_one(
             reads them back under.
         channels: The channels the target declares, keyed by name. Required for a planted
             attack and unused otherwise.
+        subject_kinds: The identifier kinds the agent's data scope binds a record by. A
+            scheduled firing uses them to read the cohort it was woken about, so that the
+            other records in the batch are not scored as strangers.
 
     Returns:
         The outcome, successful or not.
@@ -314,6 +318,7 @@ def run_one(
                 record_id=attack.planted.record_id,
                 goal=attack.goal,
                 subject=subject,
+                subject_kinds=subject_kinds,
             )
         else:
             transcript = run_conversation(
@@ -423,7 +428,14 @@ def execute(
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {
                 pool.submit(
-                    run_one, attack, attacker, lease, max_turns, record_run, channels
+                    run_one,
+                    attack,
+                    attacker,
+                    lease,
+                    max_turns,
+                    record_run,
+                    channels,
+                    spec.policy.data_scope.subject_identifier_kinds,
                 ): attack
                 for attack, attacker in zip(attacks, attackers, strict=True)
             }
@@ -549,6 +561,9 @@ def to_json(run: SuiteRun) -> dict[str, Any]:
                     "session": o.transcript.session,
                     "goal": o.transcript.goal,
                     "subject": o.transcript.subject,
+                    "channel": o.transcript.channel,
+                    "planted": [asdict(p) for p in o.transcript.planted],
+                    "cohort": [dict(entry) for entry in o.transcript.cohort],
                     "stopped_because": o.transcript.stopped_because,
                     "spec_versions": o.transcript.spec_versions,
                     "turns": [

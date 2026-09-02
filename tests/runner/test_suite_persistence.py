@@ -67,7 +67,7 @@ def test_every_completed_transcript_is_in_the_store(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns, run, channels=None: Outcome(
+        lambda attack, attacker, lease, max_turns, run, channels=None, kinds=(): Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )
@@ -94,7 +94,13 @@ def test_an_interrupted_run_keeps_the_conversations_that_finished(
     done: list[str] = []
 
     def stop_after_three(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
+        attack: Attack,
+        attacker: Any,
+        lease: Any,
+        max_turns: int,
+        run: str,
+        channels: Any = None,
+        kinds: tuple[str, ...] = (),
     ) -> Outcome:
         if len(done) >= 3:
             raise KeyboardInterrupt
@@ -131,7 +137,13 @@ def test_an_interrupted_run_is_still_marked_finished(
     """An open run row would make the partial results look like a run still in flight."""
 
     def stop_immediately(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
+        attack: Attack,
+        attacker: Any,
+        lease: Any,
+        max_turns: int,
+        run: str,
+        channels: Any = None,
+        kinds: tuple[str, ...] = (),
     ) -> Outcome:
         raise KeyboardInterrupt
 
@@ -162,7 +174,13 @@ def test_outcomes_come_back_in_suite_sequence_not_completion_sequence(
     backwards = {attack.id: index for index, attack in enumerate(reversed(ordered))}
 
     def finish_in_reverse(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
+        attack: Attack,
+        attacker: Any,
+        lease: Any,
+        max_turns: int,
+        run: str,
+        channels: Any = None,
+        kinds: tuple[str, ...] = (),
     ) -> Outcome:
         import time
 
@@ -189,7 +207,7 @@ def test_the_run_number_is_recorded_before_the_first_transcript_is_written(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns, run, channels=None: Outcome(
+        lambda attack, attacker, lease, max_turns, run, channels=None, kinds=(): Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )
