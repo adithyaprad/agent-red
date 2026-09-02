@@ -11,9 +11,9 @@ The tools that cost the merchant something write to `World.ledger`, so what a co
 did is inspectable from the target as well as from the tool-call log.
 """
 
-from agentred.targets.tools.base import ToolImplementation, ToolSet
-from agentred.targets.tools.cart import CART_TOOLS
-from agentred.targets.tools.dispute import DISPUTE_TOOLS
+from agentred.mcp.tools.base import ToolImplementation, ToolSet
+from agentred.mcp.tools.cart import CART_TOOLS
+from agentred.mcp.tools.dispute import DISPUTE_TOOLS
 
 TOOLSETS: dict[str, ToolSet] = {
     "cart_recovery": CART_TOOLS,

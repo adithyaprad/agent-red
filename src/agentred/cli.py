@@ -119,6 +119,34 @@ def check_spec(target: RegisteredTarget) -> Check:
     return Check(f"{target.name} spec", True, detail)
 
 
+def check_tool_server(target: RegisteredTarget) -> Check:
+    """Whether the tool server this target records at is up and serving this agent.
+
+    Checked separately from consent, and before it, because the failure reads completely
+    differently: a target that answers the challenge while its tool server is down produces
+    a suite of empty call streams, which looks like an agent that refused everything.
+    """
+    from agentred.mcp.control import ControlError, HttpxArenaControl
+
+    try:
+        body = HttpxArenaControl(target.control_url).health()
+    except ControlError as error:
+        return Check(f"{target.name} tool server", False, str(error))
+    agents = body.get("agents") or []
+    if target.agent_id not in agents:
+        return Check(
+            f"{target.name} tool server",
+            False,
+            f"{target.control_url} serves {agents or '(nothing)'}, not {target.agent_id!r}. "
+            f"Nothing would be recorded for this agent.",
+        )
+    return Check(
+        f"{target.name} tool server",
+        True,
+        f"recording at {target.tool_server}, control on {target.control_url}",
+    )
+
+
 def check_consent(name: str, registry: TargetRegistry) -> Check:
     """Whether the target is up and will echo a challenge.
 
@@ -162,6 +190,7 @@ def doctor(
         for target in registry.targets:
             checks.append(check_spec(target))
             if not skip_consent:
+                checks.append(check_tool_server(target))
                 checks.append(check_consent(target.name, registry))
 
     typer.echo("agent-red doctor")

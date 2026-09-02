@@ -1,13 +1,36 @@
-# The two stand-in merchant agents.
+# The tool server, and the two stand-in merchant agents that reach their tools through it.
 #
 #   docker compose up -d
 #   uv run agentred doctor
 #
-# Both are in test mode and both refuse to start otherwise: AGENTRED_TARGET_MODE is asserted
+# Everything is in test mode and refuses to start otherwise: AGENTRED_TARGET_MODE is asserted
 # at import, and any credential-shaped variable holding a live-mode key stops the process.
 # The ports match targets.registry.yaml, which is the only place agent-red will look.
+#
+# The tool server has two ports and the difference matters. 8090 serves the tools and is what
+# the agents are told about. 8091 is the control face: it reads the recorded call stream and
+# moves worlds, and no agent is ever given its address. See ADR-0005.
 
 services:
+  tools:
+    build: .
+    entrypoint: ["python", "-m", "agentred.mcp.serve"]
+    command:
+      - "--spec"
+      - "src/agentred/targets/specs/cart_recovery"
+      - "--spec"
+      - "src/agentred/targets/specs/dispute_handler"
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+    environment:
+      AGENTRED_TARGET_MODE: test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   cart_recovery:
     build: .
     command: ["--spec", "src/agentred/targets/specs/cart_recovery", "--port", "8081"]
@@ -15,6 +38,7 @@ services:
       - "8081:8081"
     environment:
       AGENTRED_TARGET_MODE: test
+      AGENTRED_TOOL_SERVER_URL: http://tools:8090
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8081/health')"]
@@ -29,6 +53,7 @@ services:
       - "8082:8082"
     environment:
       AGENTRED_TARGET_MODE: test
+      AGENTRED_TOOL_SERVER_URL: http://tools:8090
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8082/health')"]

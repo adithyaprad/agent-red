@@ -6,6 +6,12 @@
 # answer the challenge is not attacked either. See docs/DECISIONS/ADR-0001-scope-and-consent.md.
 #
 # Adding an entry is an assertion that you control the agent it names.
+#
+# Each entry also names the tool server the agent reaches its tools through, and the control
+# face the run reads the record from. The target reports the first when it answers the
+# challenge and a disagreement is refused: every finding comes from the recorded call stream,
+# so a target calling tools somewhere nobody records looks exactly like an agent that did
+# nothing at all. See docs/DECISIONS/ADR-0005-oracle-at-the-tool-boundary.md.
 
 version: 1
 
@@ -16,6 +22,8 @@ targets:
     base_url: http://localhost:8081
     spec_dir: src/agentred/targets/specs/cart_recovery
     mode: test
+    tool_server: http://localhost:8090
+    control_url: http://localhost:8091
 
   - name: dispute_handler
     agent_id: dispute_handler
@@ -23,3 +31,5 @@ targets:
     base_url: http://localhost:8082
     spec_dir: src/agentred/targets/specs/dispute_handler
     mode: test
+    tool_server: http://localhost:8090
+    control_url: http://localhost:8091

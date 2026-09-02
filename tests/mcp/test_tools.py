@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentred.targets.tools import CART_TOOLS, DISPUTE_TOOLS
-from agentred.targets.tools.base import as_number
-from agentred.targets.world import fresh_world
+from agentred.mcp.tools import CART_TOOLS, DISPUTE_TOOLS
+from agentred.mcp.tools.base import as_number
+from agentred.mcp.world import fresh_world
 
 
 def test_lookup_cart_prices_its_lines() -> None:

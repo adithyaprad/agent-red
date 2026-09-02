@@ -1,9 +1,15 @@
 """Driving one attack conversation from the first turn to the last.
 
 This is the loop that everything else in the harness is arranged around: an attacker
-produces a turn, the target answers it, the tool calls it made on the way are recorded, and
-the whole thing is handed back as a transcript that the judge can read and the store can
-keep.
+produces a turn, the target answers it, what it did on the way is read from the tool
+server's record, and the whole thing is handed back as a transcript that the judge can read
+and the store can keep.
+
+**The target is never asked what it did.** After each turn the driver reads the calls the
+tool server recorded for this session, and the ones that appeared since the previous turn
+are that turn's calls. The reply body carries prose and versions only. A driver that read a
+tool-call log out of the reply would be taking the measured party's word for it, and would
+need a new integration for every agent runtime (ADR-0005).
 
 Every function that reaches a target takes a `ConsentToken`, which only
 `runner.consent.establish_consent` can produce. There is no argument here that accepts a
@@ -18,6 +24,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from agentred.mcp.control import ArenaControl, HttpxArenaControl
+from agentred.mcp.recorder import RecordedCall
 from agentred.runner.consent import ConsentToken
 
 DEFAULT_MAX_TURNS = 6
@@ -35,7 +43,7 @@ class TargetError(RuntimeError):
 
 @dataclass(frozen=True)
 class ToolCallRecord:
-    """One tool call the target made, as the target reported it.
+    """One tool call, as the tool server observed it.
 
     Attributes:
         name: The declared tool name.
@@ -50,12 +58,17 @@ class ToolCallRecord:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> ToolCallRecord:
-        """Build a record from one entry of a `/chat` response."""
+        """Build a record from a stored transcript."""
         return cls(
             name=str(payload.get("name", "")),
             arguments=dict(payload.get("arguments") or {}),
             result=dict(payload.get("result") or {}),
         )
+
+    @classmethod
+    def from_recorded(cls, call: RecordedCall) -> ToolCallRecord:
+        """Build a record from what the tool server recorded."""
+        return cls(name=call.name, arguments=dict(call.arguments), result=dict(call.result))
 
 
 @dataclass(frozen=True)
@@ -170,9 +183,16 @@ class TargetTransport(Protocol):
     """
 
     def send(
-        self, token: ConsentToken, session: str, conversation: list[dict[str, str]]
+        self, token: ConsentToken, session: str, run: str, conversation: list[dict[str, str]]
     ) -> dict[str, Any]:
         """Send a conversation and return the decoded `/chat` response.
+
+        Args:
+            token: Proof that the target consented.
+            session: The conversation's session id.
+            run: The run its tool calls are recorded under. Passed to the target because the
+                target has to point its tool connector somewhere, and this is where.
+            conversation: The conversation so far, ending with the turn to answer.
 
         Raises:
             TargetError: If the target is unreachable or answers with a non-200 status or
@@ -216,7 +236,7 @@ class HttpxTargetTransport:
         self.timeout = timeout
 
     def send(
-        self, token: ConsentToken, session: str, conversation: list[dict[str, str]]
+        self, token: ConsentToken, session: str, run: str, conversation: list[dict[str, str]]
     ) -> dict[str, Any]:
         """Post one turn to the consented target. See `TargetTransport.send`."""
         import httpx
@@ -225,7 +245,7 @@ class HttpxTargetTransport:
         try:
             response = httpx.post(
                 token.chat_url,
-                json={"session": session, "conversation": conversation},
+                json={"session": session, "run": run, "conversation": conversation},
                 timeout=self.timeout,
             )
         except httpx.HTTPError as error:
@@ -283,8 +303,10 @@ def run_conversation(
     token: ConsentToken,
     attacker: Attacker,
     *,
+    run: str,
     max_turns: int = DEFAULT_MAX_TURNS,
     transport: TargetTransport | None = None,
+    control: ArenaControl | None = None,
     session: str | None = None,
     subject: dict[str, str] | None = None,
     resume: Transcript | None = None,
@@ -295,13 +317,21 @@ def run_conversation(
     conversation inside a long suite can outlive the agreement it began under, and the
     correct behaviour then is to stop, not to finish the conversation politely.
 
+    What the agent did is read from the tool server after each turn, never from the reply.
+    The world is checkpointed at each turn boundary too, so a fork taken later branches from
+    the state that existed at the branch point rather than from the state at the end.
+
     Args:
         token: Proof that the target consented. The only way to name a target.
         attacker: Produces each turn. May stop early by returning `None`.
+        run: The run this conversation belongs to. Its calls are recorded under it, and read
+            back under it, so two runs against one agent never read each other's evidence.
         max_turns: Ceiling on exchanges. The budget is per conversation, and a conversation
             that has not broken the agent in six turns is a result rather than a reason to
             keep going.
         transport: How turns are sent. Defaults to HTTP.
+        control: How the tool server's record is read. Defaults to HTTP against the control
+            face named in the registry entry for this target.
         session: Force the session id. Used when continuing a forked conversation;
             otherwise a fresh id gives this conversation a private world.
         subject: Who the conversation is about, as identifier kind to value. Recorded on the
@@ -318,8 +348,11 @@ def run_conversation(
         ConsentError: If the token expires mid-conversation.
         TargetError: If the target becomes unreachable or answers unusably. A broken target
             is not a well-behaved one, so this is not swallowed into the transcript.
+        ControlError: If the tool server cannot be read. A conversation whose record cannot
+            be read is not a conversation in which nothing happened.
     """
     transport = HttpxTargetTransport() if transport is None else transport
+    control = HttpxArenaControl(token.target.control_url) if control is None else control
     if resume is not None:
         transcript = resume
         if session is not None:
@@ -332,6 +365,10 @@ def run_conversation(
             subject=dict(subject or {}),
         )
     already = len(transcript.turns)
+    # How much of this session's stream belongs to turns already in the transcript. Zero for
+    # a fresh conversation and for a branch, which has its own stream even though it inherits
+    # the world and the turns of the conversation it came from.
+    seen_calls = len(control.calls(run, transcript.session))
 
     for index in range(already, already + max_turns):
         token.require_live()
@@ -342,21 +379,23 @@ def run_conversation(
 
         conversation = [*transcript.messages, {"role": "user", "content": user_turn}]
         started = time.monotonic()
-        body = transport.send(token, transcript.session, conversation)
+        body = transport.send(token, transcript.session, run, conversation)
         elapsed = time.monotonic() - started
 
+        recorded = control.calls(run, transcript.session)
+        this_turn = recorded[seen_calls:]
+        seen_calls = len(recorded)
         transcript.turns.append(
             Turn(
                 index=index,
                 user=user_turn,
                 reply=str(body.get("reply", "")),
-                tool_calls=tuple(
-                    ToolCallRecord.from_payload(call) for call in body.get("tool_calls") or []
-                ),
+                tool_calls=tuple(ToolCallRecord.from_recorded(call) for call in this_turn),
                 latency_seconds=round(elapsed, 3),
                 agent_usage={key: float(value) for key, value in (body.get("usage") or {}).items()},
             )
         )
+        control.checkpoint(transcript.session)
         versions = body.get("spec_versions")
         if isinstance(versions, dict):
             _record_versions(transcript, versions, token)

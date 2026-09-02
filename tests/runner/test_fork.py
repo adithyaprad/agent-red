@@ -7,14 +7,14 @@ import pytest
 from agentred.runner.conversation import TargetError, run_conversation
 from agentred.runner.fork import Branch, fan_out, fork_conversation, prefix_of
 from tests.fakes.target import BrokenTransport, ScriptedTurn
-from tests.runner.test_conversation import ScriptedAttacker, consent_for, target
+from tests.runner.test_conversation import ScriptedAttacker, consent_for, driving, target
 
 
 def opening(transport: object) -> object:
     return run_conversation(
         consent_for(),
         ScriptedAttacker("hello", "my order is ORD-55210"),
-        transport=transport,
+        **driving(transport),
     )
 
 
@@ -36,7 +36,7 @@ def test_a_branch_keeps_the_shared_turns_and_adds_its_own() -> None:
     transport = target(ScriptedTurn(reply="a"), ScriptedTurn(reply="b"), ScriptedTurn(reply="c"))
     transcript = opening(transport)
     branch = fork_conversation(
-        consent_for(), transcript, ScriptedAttacker("refund me"), at_turn=1, transport=transport
+        consent_for(), transcript, ScriptedAttacker("refund me"), at_turn=1, **driving(transport)
     )
     assert [turn.user for turn in branch.turns] == ["hello", "refund me"]
     assert branch.session != transcript.session
@@ -50,7 +50,7 @@ def test_a_branch_carries_its_own_goal() -> None:
         transcript,
         ScriptedAttacker("go on", goal="invent a return policy"),
         at_turn=1,
-        transport=transport,
+        **driving(transport),
     )
     assert branch.goal == "invent a return policy"
 
@@ -63,7 +63,7 @@ def test_a_branch_starts_from_the_worlds_state_at_the_fork() -> None:
     )
     transcript = opening(transport)
     branch = fork_conversation(
-        consent_for(), transcript, ScriptedAttacker("again please"), at_turn=2, transport=transport
+        consent_for(), transcript, ScriptedAttacker("again please"), at_turn=2, **driving(transport)
     )
     assert branch.tool_calls[-1].result["refunded_to_date"] == 300
 
@@ -84,7 +84,7 @@ def test_two_branches_cannot_see_each_others_damage() -> None:
             Branch(attacker=ScriptedAttacker("two"), label="urgent"),
         ],
         at_turn=1,
-        transport=transport,
+        **driving(transport),
     )
     assert len(branches) == 2
     for branch in branches:
@@ -97,7 +97,7 @@ def test_forking_a_session_the_target_does_not_have_is_an_error() -> None:
     transcript.session = "ar-never-existed"
     with pytest.raises(TargetError, match="no session"):
         fork_conversation(
-            consent_for(), transcript, ScriptedAttacker("x"), at_turn=1, transport=transport
+            consent_for(), transcript, ScriptedAttacker("x"), at_turn=1, **driving(transport)
         )
 
 
@@ -105,7 +105,11 @@ def test_a_target_that_cannot_fork_stops_the_branch() -> None:
     transcript = opening(target(ScriptedTurn(reply="a")))
     with pytest.raises(TargetError, match="502"):
         fork_conversation(
-            consent_for(), transcript, ScriptedAttacker("x"), at_turn=1, transport=BrokenTransport()
+            consent_for(),
+            transcript,
+            ScriptedAttacker("x"),
+            at_turn=1,
+            **driving(BrokenTransport()),
         )
 
 
@@ -120,7 +124,7 @@ def test_the_branch_budget_counts_new_turns_only() -> None:
             return "more"
 
     branch = fork_conversation(
-        consent_for(), transcript, Untiring(), at_turn=1, max_turns=2, transport=transport
+        consent_for(), transcript, Untiring(), at_turn=1, max_turns=2, **driving(transport)
     )
     assert len(branch.turns) == 3
     assert branch.stopped_because == "turn budget spent"
@@ -141,14 +145,14 @@ def test_a_branch_does_not_inherit_damage_from_turns_it_does_not_contain() -> No
         transcript,
         ScriptedAttacker("try something else"),
         at_turn=1,
-        transport=transport,
+        **driving(transport),
     )
     late = fork_conversation(
         consent_for(),
         transcript,
         ScriptedAttacker("try something else"),
         at_turn=2,
-        transport=transport,
+        **driving(transport),
     )
     # The early branch starts from a world where nothing had been refunded yet; the late one
     # starts after the 400 that turn two paid out.
@@ -162,5 +166,5 @@ def test_forking_past_the_end_of_a_conversation_is_refused() -> None:
     transcript = opening(transport)
     with pytest.raises(ValueError, match="prefix"):
         fork_conversation(
-            consent_for(), transcript, ScriptedAttacker("x"), at_turn=5, transport=transport
+            consent_for(), transcript, ScriptedAttacker("x"), at_turn=5, **driving(transport)
         )

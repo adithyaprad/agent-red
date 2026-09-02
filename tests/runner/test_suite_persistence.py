@@ -67,7 +67,7 @@ def test_every_completed_transcript_is_in_the_store(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns: Outcome(
+        lambda attack, attacker, lease, max_turns, run: Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )
@@ -93,7 +93,9 @@ def test_an_interrupted_run_keeps_the_conversations_that_finished(
     """The defect run 0006 exposed. Interrupting used to leave nothing behind."""
     done: list[str] = []
 
-    def stop_after_three(attack: Attack, attacker: Any, lease: Any, max_turns: int) -> Outcome:
+    def stop_after_three(
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+    ) -> Outcome:
         if len(done) >= 3:
             raise KeyboardInterrupt
         done.append(attack.id)
@@ -128,7 +130,9 @@ def test_an_interrupted_run_is_still_marked_finished(
 ) -> None:
     """An open run row would make the partial results look like a run still in flight."""
 
-    def stop_immediately(attack: Attack, attacker: Any, lease: Any, max_turns: int) -> Outcome:
+    def stop_immediately(
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+    ) -> Outcome:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(suite_module, "run_one", stop_immediately)
@@ -157,7 +161,9 @@ def test_outcomes_come_back_in_suite_sequence_not_completion_sequence(
     ordered = attacks(6)
     backwards = {attack.id: index for index, attack in enumerate(reversed(ordered))}
 
-    def finish_in_reverse(attack: Attack, attacker: Any, lease: Any, max_turns: int) -> Outcome:
+    def finish_in_reverse(
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+    ) -> Outcome:
         import time
 
         time.sleep(backwards[attack.id] * 0.01)
@@ -183,7 +189,7 @@ def test_the_run_number_is_recorded_before_the_first_transcript_is_written(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns: Outcome(
+        lambda attack, attacker, lease, max_turns, run: Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )

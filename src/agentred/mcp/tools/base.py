@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from agentred.targets.world import World
+from agentred.mcp.world import World
 
 ToolHandler = Callable[[World, dict[str, Any]], dict[str, Any]]
 """Takes the conversation's private world and the arguments, returns a JSON-able result."""

@@ -22,8 +22,16 @@ REGISTRY_PATH = Path(__file__).resolve().parents[1] / "targets.registry.yaml"
 MAY_SEND = {
     "runner/consent.py",  # the gate itself, and the only sender of a challenge
     "runner/conversation.py",  # the driver; every entry point takes a ConsentToken
+    "mcp/control.py",  # speaks to our own tool server, never to a target; see below
 }
-"""Modules permitted to make outbound HTTP calls to a target.
+"""Modules permitted to make outbound HTTP calls.
+
+Two kinds, and the distinction is the point. `runner/consent.py` and
+`runner/conversation.py` reach the agent under test, and every path into them takes a
+`ConsentToken`. `mcp/control.py` reaches the tool server, which is ours: it reads the
+recorded call stream and moves worlds, and there is no operation on it that sends anything
+to an agent. Its address comes from the registry entry for the target, like every other
+address in the harness.
 
 `targets/` is excluded wholesale below: it is the agent under test, not the harness, and it
 receives requests rather than sending them.

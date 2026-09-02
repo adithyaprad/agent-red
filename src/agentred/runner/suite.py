@@ -18,6 +18,7 @@ the main thread to be written. Persistence was never the slow part.
 
 from __future__ import annotations
 
+import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -242,7 +243,9 @@ def select(suite: tuple[Attack, ...], stakes: tuple[str, ...], limit: int) -> tu
     return chosen[:limit] if limit else chosen
 
 
-def run_one(attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int) -> Outcome:
+def run_one(
+    attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int, run: str
+) -> Outcome:
     """Execute one conversation, capturing a failure rather than propagating it.
 
     One attack failing must not end the run: the others are independent, and the failure is
@@ -258,6 +261,8 @@ def run_one(attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int) 
         lease: Asked for a token as this conversation starts, so a suite longer than the
             consent window renews rather than being refused by its own gate.
         max_turns: Per-conversation budget.
+        run: The run the tool server records this conversation's calls under, and the runner
+            reads them back under.
 
     Returns:
         The outcome, successful or not.
@@ -266,7 +271,9 @@ def run_one(attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int) 
     subject = dict(attack.subject.identifiers) if attack.subject is not None else None
     try:
         token = lease.token()
-        transcript = run_conversation(token, attacker, max_turns=max_turns, subject=subject)
+        transcript = run_conversation(
+            token, attacker, run=run, max_turns=max_turns, subject=subject
+        )
     except Exception as error:
         return Outcome(
             attack=attack,
@@ -348,6 +355,10 @@ def execute(
     store = Store(store_path) if store_path is not None else None
     if store is not None:
         run.run_id = store.create_run(run.target, spec.version_tuple, notes=describe(run))
+    # What the tool server files this run's calls under. The store's id when there is a
+    # store, so a transcript and the record behind it carry the same name; a minted one
+    # otherwise, because two runs sharing a key would read each other's evidence.
+    record_run = run.run_id or f"unstored-{secrets.token_hex(6)}"
 
     def settle() -> None:
         """Put the run in a reportable state, whether or not every attack ran."""
@@ -361,7 +372,7 @@ def execute(
     try:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {
-                pool.submit(run_one, attack, attacker, lease, max_turns): attack
+                pool.submit(run_one, attack, attacker, lease, max_turns, record_run): attack
                 for attack, attacker in zip(attacks, attackers, strict=True)
             }
             for future in as_completed(futures):

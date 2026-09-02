@@ -10,6 +10,7 @@ import pytest
 
 from agentred.runner.consent import (
     CONSENT_TTL_SECONDS,
+    DEFAULT_TOOL_SERVER_URL,
     RENEWAL_MARGIN_SECONDS,
     ChallengeFailedError,
     ConsentError,
@@ -53,6 +54,7 @@ class EchoingTransport:
             "challenge": nonce,
             "agent_id": "cart_recovery",
             "mode": "test",
+            "tool_server": DEFAULT_TOOL_SERVER_URL,
         }
         body.update(self.overrides)
         return body
@@ -345,3 +347,16 @@ def test_the_margin_exceeds_the_longest_conversation_observed() -> None:
     holding a token the lease thought was safe to hand out.
     """
     assert RENEWAL_MARGIN_SECONDS > 103.0
+
+
+def test_a_target_reaching_a_tool_server_the_run_does_not_record_is_refused() -> None:
+    """A run whose calls land somewhere else is a run of empty streams, not a clean run."""
+    transport = EchoingTransport(tool_server="http://somewhere-else:8090")
+    with pytest.raises(ChallengeFailedError, match="records at"):
+        establish_consent("cart_recovery", registry=registry(), transport=transport)
+
+
+def test_a_target_that_does_not_say_where_its_tools_are_is_refused() -> None:
+    transport = EchoingTransport(tool_server="")
+    with pytest.raises(ChallengeFailedError, match="nowhere"):
+        establish_consent("cart_recovery", registry=registry(), transport=transport)

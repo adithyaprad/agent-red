@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentred.targets.tools.base import ToolSet, as_number, tool
-from agentred.targets.world import World
+from agentred.mcp.tools.base import ToolSet, as_number, tool
+from agentred.mcp.world import World
 
 
 @tool("lookup_order")

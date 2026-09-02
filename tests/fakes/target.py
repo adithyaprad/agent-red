@@ -1,9 +1,12 @@
 """A target backend that follows a script instead of calling a model.
 
-Lets the HTTP surface, the session isolation, the tool binding and the tool-call log all be
-tested offline. The script is a list of turns; each turn names the tools to call and the
-text to reply with, which is enough to reproduce every shape a real conversation produces
-without reproducing the model.
+Lets the HTTP surface, the session handling, the recorder and the driver all be tested
+offline. The script is a list of turns; each turn names the tools to call and the text to
+reply with, which is enough to reproduce every shape a real conversation produces without
+reproducing the model.
+
+The scripted backend calls tools the way a real one does: at the tool server, which records
+them. It skips only the MCP hop, which has its own tests in `tests/mcp/test_server.py`.
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentred.mcp.recorder import RecordedCall
+from agentred.mcp.server import Binding, ToolServer
 from agentred.targets.runtime import ChatMessage, Session, TargetAgent
 
 
@@ -28,17 +33,19 @@ class ScriptedTurn:
 
 
 class ScriptedBackend:
-    """Replays scripted turns in order, calling real tools against the session's world.
+    """Replays scripted turns in order, calling real tools at a real tool server.
 
     Attributes:
         turns: The script. The last turn repeats if the conversation runs past it.
-        agent: The target whose tools are called. Set by `attach`.
+        server: Where the tools live and where the calls are recorded.
+        agent: The target this backend replies for. Set by `attach`.
         seen: Every conversation this backend was asked to reply to, for assertions about
             what the runner actually sent.
     """
 
-    def __init__(self, *turns: ScriptedTurn) -> None:
+    def __init__(self, *turns: ScriptedTurn, server: ToolServer) -> None:
         self.turns = list(turns) or [ScriptedTurn(reply="")]
+        self.server = server
         self.agent: TargetAgent | None = None
         self.seen: list[list[ChatMessage]] = []
 
@@ -49,16 +56,59 @@ class ScriptedBackend:
         assert self.agent is not None, "ScriptedBackend was never attached"
         self.seen.append(list(conversation))
         turn = self.turns[min(len(self.seen) - 1, len(self.turns) - 1)]
+        binding = Binding(
+            agent_id=self.agent.spec.config.agent_id,
+            run=session.run,
+            session=session.session_id,
+        )
         for name, arguments in turn.calls:
-            self.agent.call_tool(session, name, arguments)
+            self.server.call(binding, name, arguments)
         return turn.reply
+
+
+class InProcessArenaControl:
+    """The control face, reached directly rather than over HTTP.
+
+    Same operations the runner performs in production, against the same arena and the same
+    recorder, with the socket taken out.
+    """
+
+    def __init__(self, server: ToolServer) -> None:
+        self.server = server
+
+    def health(self) -> dict[str, Any]:
+        return {"status": "ok", "agents": list(self.server.agent_ids)}
+
+    def calls(self, run: str, session: str) -> tuple[RecordedCall, ...]:
+        return self.server.recorder.calls(run, session)
+
+    def checkpoint(self, session: str) -> int:
+        self.server.arena.world(session)
+        return self.server.arena.checkpoint(session)
+
+    def branch(self, source: str, session: str, at_turn: int | None = None) -> None:
+        self.server.arena.branch(source, session, at_turn)
+
+    def restore(self, session: str) -> None:
+        self.server.arena.restore(session)
+
+    def plant(
+        self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
+    ) -> str:
+        return self.server.arena.plant(
+            session,
+            collection=collection,
+            record_id=record_id,
+            field_name=field_name,
+            payload=payload,
+        )
 
 
 class InProcessTransport:
     """Sends turns straight to a `TargetAgent`, with no socket in between.
 
     Lets the driver be tested against a real target: real tool implementations, real
-    per-session worlds, real tool-call log. Only the HTTP hop and the model are absent, and
+    per-session worlds, real recorded calls. Only the HTTP hop and the model are absent, and
     both have their own tests.
 
     Attributes:
@@ -72,7 +122,7 @@ class InProcessTransport:
         self.tokens: list[object] = []
 
     def send(
-        self, token: object, session: str, conversation: list[dict[str, str]]
+        self, token: Any, session: str, run: str, conversation: list[dict[str, str]]
     ) -> dict[str, Any]:
         import asyncio
 
@@ -80,10 +130,10 @@ class InProcessTransport:
 
         token.require_live()
         self.tokens.append(token)
-        request = ChatRequest(session=session, conversation=conversation)
+        request = ChatRequest(session=session, run=run, conversation=conversation)
         return asyncio.run(self.agent.chat(request)).model_dump()
 
-    def fork(self, token: object, source: str, session: str, at_turn: int | None = None) -> None:
+    def fork(self, token: Any, source: str, session: str, at_turn: int | None = None) -> None:
         from agentred.runner.conversation import TargetError
 
         token.require_live()
@@ -98,13 +148,13 @@ class BrokenTransport:
     """A target that answers every turn with an outage."""
 
     def send(
-        self, token: object, session: str, conversation: list[dict[str, str]]
+        self, token: Any, session: str, run: str, conversation: list[dict[str, str]]
     ) -> dict[str, Any]:
         from agentred.runner.conversation import TargetError
 
         raise TargetError("target answered a turn with HTTP 502")
 
-    def fork(self, token: object, source: str, session: str, at_turn: int | None = None) -> None:
+    def fork(self, token: Any, source: str, session: str, at_turn: int | None = None) -> None:
         from agentred.runner.conversation import TargetError
 
         raise TargetError("target answered a fork with HTTP 502")

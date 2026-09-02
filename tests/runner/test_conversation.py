@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from agentred.mcp.server import ToolServer
 from agentred.runner.consent import (
     CONSENT_TTL_SECONDS,
     ConsentError,
@@ -16,6 +17,7 @@ from agentred.spec import load_spec_dir
 from agentred.targets.runtime import build_agent
 from tests.fakes.target import (
     BrokenTransport,
+    InProcessArenaControl,
     InProcessTransport,
     ScriptedBackend,
     ScriptedTurn,
@@ -74,11 +76,33 @@ def consent_for(agent_id: str = "dispute_handler") -> object:
     )
 
 
+RUN = "run-under-test"
+
+
 def target(*turns: ScriptedTurn, agent_id: str = "dispute_handler") -> InProcessTransport:
-    backend = ScriptedBackend(*turns)
-    agent = build_agent(load_spec_dir(f"{SPEC_ROOT}/{agent_id}"), backend=backend)
+    """A wired target: a scripted agent, and the tool server that records what it does."""
+    spec = load_spec_dir(f"{SPEC_ROOT}/{agent_id}")
+    server = ToolServer([spec])
+    backend = ScriptedBackend(*turns, server=server)
+    agent = build_agent(spec, backend=backend)
     backend.attach(agent)
-    return InProcessTransport(agent)
+    transport = InProcessTransport(agent)
+    transport.control = InProcessArenaControl(server)
+    transport.server = server
+    return transport
+
+
+def driving(transport: object) -> dict[str, object]:
+    """The three arguments every conversation needs: where to send, what to read, which run.
+
+    A transport with no tool server behind it, which is what a broken target is, reads its
+    record from an empty server rather than from nowhere: the failure under test is the
+    outage, not a missing recorder.
+    """
+    control = getattr(transport, "control", None)
+    if control is None:
+        control = InProcessArenaControl(ToolServer([load_spec_dir(f"{SPEC_ROOT}/dispute_handler")]))
+    return {"transport": transport, "control": control, "run": RUN}
 
 
 def test_a_conversation_runs_end_to_end_and_records_what_happened() -> None:
@@ -89,7 +113,7 @@ def test_a_conversation_runs_end_to_end_and_records_what_happened() -> None:
         )
     )
     transcript = run_conversation(
-        consent_for(), ScriptedAttacker("my sofa never arrived"), transport=transport
+        consent_for(), ScriptedAttacker("my sofa never arrived"), **driving(transport)
     )
 
     assert transcript.target == "dispute_handler"
@@ -114,7 +138,7 @@ def test_the_transcript_flattens_every_tool_call_in_order() -> None:
         ),
     )
     transcript = run_conversation(
-        consent_for(), ScriptedAttacker("hello", "refund me"), transport=transport
+        consent_for(), ScriptedAttacker("hello", "refund me"), **driving(transport)
     )
     assert [call.name for call in transcript.tool_calls] == [
         "lookup_order",
@@ -131,27 +155,27 @@ def test_the_arguments_survive_the_round_trip_uncoerced() -> None:
             reply="ok", calls=[("issue_refund", {"order_id": "ORD-55210", "amount": "900"})]
         )
     )
-    transcript = run_conversation(consent_for(), ScriptedAttacker("refund"), transport=transport)
+    transcript = run_conversation(consent_for(), ScriptedAttacker("refund"), **driving(transport))
     assert transcript.tool_calls[0].arguments["amount"] == "900"
 
 
 def test_the_agent_sees_the_whole_conversation_so_far() -> None:
     transport = target(ScriptedTurn(reply="a"), ScriptedTurn(reply="b"))
-    run_conversation(consent_for(), ScriptedAttacker("one", "two"), transport=transport)
+    run_conversation(consent_for(), ScriptedAttacker("one", "two"), **driving(transport))
     backend = transport.agent.backend
     assert [message.content for message in backend.seen[-1]] == ["one", "a", "two"]
 
 
 def test_the_turn_budget_ends_a_conversation_that_will_not_stop() -> None:
     transcript = run_conversation(
-        consent_for(), UntiringAttacker(), transport=target(), max_turns=3
+        consent_for(), UntiringAttacker(), **driving(target()), max_turns=3
     )
     assert len(transcript.turns) == 3
     assert transcript.stopped_because == "turn budget spent"
 
 
 def test_the_transcript_carries_the_versions_the_target_reported() -> None:
-    transcript = run_conversation(consent_for(), ScriptedAttacker("hi"), transport=target())
+    transcript = run_conversation(consent_for(), ScriptedAttacker("hi"), **driving(target()))
     assert transcript.spec_versions["model"] == "claude-sonnet-5"
     assert transcript.spec_versions["tools"].startswith("sha256:")
 
@@ -160,8 +184,8 @@ def test_a_target_that_changes_version_mid_conversation_stops_the_run() -> None:
     transport = target(ScriptedTurn(reply="a"), ScriptedTurn(reply="b"))
     original = transport.send
 
-    def drifting(token, session, conversation):
-        body = original(token, session, conversation)
+    def drifting(token, session, run, conversation):
+        body = original(token, session, run, conversation)
         if len(conversation) > 1:
             # Derived from what the target actually reported rather than written down, so
             # this stays a drift no matter what version the spec under test happens to be on.
@@ -170,12 +194,12 @@ def test_a_target_that_changes_version_mid_conversation_stops_the_run() -> None:
 
     transport.send = drifting
     with pytest.raises(TargetError, match="changed spec version"):
-        run_conversation(consent_for(), ScriptedAttacker("one", "two"), transport=transport)
+        run_conversation(consent_for(), ScriptedAttacker("one", "two"), **driving(transport))
 
 
 def test_every_turn_carries_the_consent_token() -> None:
     transport = target()
-    run_conversation(consent_for(), ScriptedAttacker("one", "two"), transport=transport)
+    run_conversation(consent_for(), ScriptedAttacker("one", "two"), **driving(transport))
     assert len(transport.tokens) == 2
     assert all(token.nonce == transport.tokens[0].nonce for token in transport.tokens)
 
@@ -184,18 +208,18 @@ def test_an_expired_token_stops_the_conversation_mid_way() -> None:
     token = consent_for()
     object.__setattr__(token, "granted_at", token.granted_at - CONSENT_TTL_SECONDS - 1)
     with pytest.raises(ConsentError, match="expired"):
-        run_conversation(token, ScriptedAttacker("one"), transport=target())
+        run_conversation(token, ScriptedAttacker("one"), **driving(target()))
 
 
 def test_a_broken_target_is_a_broken_run_not_a_well_behaved_agent() -> None:
     with pytest.raises(TargetError, match="502"):
-        run_conversation(consent_for(), ScriptedAttacker("one"), transport=BrokenTransport())
+        run_conversation(consent_for(), ScriptedAttacker("one"), **driving(BrokenTransport()))
 
 
 def test_each_conversation_gets_its_own_session_by_default() -> None:
     transport = target()
-    first = run_conversation(consent_for(), ScriptedAttacker("one"), transport=transport)
-    second = run_conversation(consent_for(), ScriptedAttacker("one"), transport=transport)
+    first = run_conversation(consent_for(), ScriptedAttacker("one"), **driving(transport))
+    second = run_conversation(consent_for(), ScriptedAttacker("one"), **driving(transport))
     assert first.session != second.session
 
 
@@ -203,8 +227,8 @@ def test_a_conversation_can_be_continued_in_an_existing_session() -> None:
     transport = target(
         ScriptedTurn(reply="ok", calls=[("issue_refund", {"order_id": "ORD-55210", "amount": 10})])
     )
-    first = run_conversation(consent_for(), ScriptedAttacker("one"), transport=transport)
+    first = run_conversation(consent_for(), ScriptedAttacker("one"), **driving(transport))
     second = run_conversation(
-        consent_for(), ScriptedAttacker("two"), transport=transport, session=first.session
+        consent_for(), ScriptedAttacker("two"), **driving(transport), session=first.session
     )
     assert second.tool_calls[0].result["refunded_to_date"] == 20

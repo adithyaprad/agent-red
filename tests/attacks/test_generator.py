@@ -437,7 +437,7 @@ class TestItSatisfiesTheDriver:
         """The contract that matters: the driver knows nothing about technique."""
         from agentred.runner.conversation import run_conversation
         from tests.fakes.target import ScriptedTurn
-        from tests.runner.test_conversation import consent_for, target
+        from tests.runner.test_conversation import consent_for, driving, target
 
         client = RecordedModelClient(replies=[reply("first"), reply("second")])
         attacker = ModelAttacker(attack=suite[0], client=client, max_turns=2)
@@ -445,7 +445,7 @@ class TestItSatisfiesTheDriver:
             consent_for(),
             attacker,
             max_turns=2,
-            transport=target(ScriptedTurn(reply="I can look into that.")),
+            **driving(target(ScriptedTurn(reply="I can look into that."))),
         )
         assert [turn.user for turn in transcript.turns] == ["first", "second"]
         assert transcript.goal == suite[0].stake.objective

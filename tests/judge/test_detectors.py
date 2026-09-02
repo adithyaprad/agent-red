@@ -153,7 +153,7 @@ class TestTheWholeChain:
     def test_a_conversation_run_through_the_driver_is_readable_by_the_detectors(self):
         from agentred.runner.conversation import run_conversation
         from tests.fakes.target import ScriptedTurn
-        from tests.runner.test_conversation import ScriptedAttacker, consent_for, target
+        from tests.runner.test_conversation import ScriptedAttacker, consent_for, driving, target
 
         transport = target(
             ScriptedTurn(
@@ -164,7 +164,7 @@ class TestTheWholeChain:
         transcript = run_conversation(
             consent_for(),
             ScriptedAttacker("my sofa never turned up"),
-            transport=transport,
+            **driving(transport),
             subject={"order_id": "ORD-55210"},
         )
         from tests.judge.conftest import spec_for

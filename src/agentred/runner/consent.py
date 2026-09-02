@@ -50,6 +50,14 @@ DEFAULT_CHALLENGE_PATH = "/challenge"
 DEFAULT_CHAT_PATH = "/chat"
 CHALLENGE_TIMEOUT_SECONDS = 10.0
 
+DEFAULT_TOOL_SERVER_URL = "http://localhost:8090"
+DEFAULT_CONTROL_URL = "http://localhost:8091"
+"""Where the tools are served, and where the record of them is read.
+
+Two ports rather than two paths: an agent is handed the first and never the second, so
+reading the record, restoring a world and planting into one are not operations it can reach.
+"""
+
 _ISSUER = object()
 """Sentinel proving a token came from `establish_consent` and not from a caller."""
 
@@ -100,6 +108,13 @@ class RegisteredTarget(BaseModel):
         description: What the agent does, for the operator reading `agentred doctor`.
         challenge_path: Path that echoes the nonce.
         chat_path: Path that takes a conversation and returns a reply.
+        tool_server: Origin of the tool server this target must reach its tools through, and
+            therefore the server this run's evidence is recorded at. The target reports what
+            it will use when it answers the challenge, and a disagreement is refused: a
+            target calling tools somewhere nobody is recording produces a run of empty call
+            streams, which reads as an agent that did nothing.
+        control_url: Origin of that tool server's control face, which the runner reads the
+            record from and moves worlds through. Never handed to an agent.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -112,8 +127,10 @@ class RegisteredTarget(BaseModel):
     description: str = Field(default="")
     challenge_path: str = Field(default=DEFAULT_CHALLENGE_PATH)
     chat_path: str = Field(default=DEFAULT_CHAT_PATH)
+    tool_server: str = Field(default=DEFAULT_TOOL_SERVER_URL, min_length=1)
+    control_url: str = Field(default=DEFAULT_CONTROL_URL, min_length=1)
 
-    @field_validator("base_url")
+    @field_validator("base_url", "tool_server", "control_url")
     @classmethod
     def _bare_origin(cls, value: str) -> str:
         """Require an http origin with no path, and drop a trailing slash."""
@@ -481,6 +498,15 @@ def _verify(target: RegisteredTarget, nonce: str, body: dict[str, Any]) -> None:
             f"{target.name!r} reports mode {reported_mode!r} but the registry declares "
             f"{target.mode!r}. Attacks include refunds and discounts, so a target that "
             f"cannot prove it is in {target.mode!r} mode is not attacked."
+        )
+
+    reported_server = str(body.get("tool_server", "")).rstrip("/")
+    if reported_server != target.tool_server.rstrip("/"):
+        raise ChallengeFailedError(
+            f"{target.name!r} reaches its tools at {reported_server or '(nowhere)'} but this "
+            f"run records at {target.tool_server}. Every finding comes from the recorded call "
+            f"stream, so a target calling tools somewhere else produces a run in which the "
+            f"agent appears to have done nothing at all."
         )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentred.targets.world import fresh_world
+from agentred.mcp.world import fresh_world
 
 
 def test_the_seed_loads() -> None:

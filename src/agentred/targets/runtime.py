@@ -1,43 +1,56 @@
 """A spec, turned into a running agent behind an HTTP endpoint.
 
 This is the stand-in for a merchant agent platform. It takes the same `AgentSpec` every
-other package reads, binds the declared tools to the implementations in `tools/`, and serves
-the result on two endpoints: one that answers a consent challenge, and one that takes a turn
-of conversation and returns the reply along with every tool the agent called while producing
-it. Nothing here is part of the product surface. It exists so the harness has something
-honest to attack.
+other package reads, points the agent's tool connector at the tool server, and serves the
+result on two endpoints: one that answers a consent challenge, and one that takes a turn of
+conversation and returns the reply. Nothing here is part of the product surface. It exists
+so the harness has something honest to attack.
 
-Two properties matter and both are enforced rather than documented. Importing this module
-asserts test mode, so an agent that can refund money cannot be started against live
-credentials. And the tool set is checked against the spec at construction, because a
-declared tool with no implementation is an agent that fails halfway through a conversation
-and reads on the scorecard as a target that resisted.
+**A target says what it said, and nothing about what it did.** The reply carries prose and
+the spec versions it belongs to. It does not carry a tool-call log, because a log the
+measured party volunteers is a self-report rather than evidence, and requiring one would
+mean requiring every agent runtime to be modified before it could be measured. The calls are
+recorded at the tool server, on the harness's side of the trust line (ADR-0005). A target
+that wanted to lie about its behaviour would have to lie to the tool server, which means not
+calling the tool, which means not having the effect.
 
-Conversation state is held per session id, and the transcript itself is authoritative on the
-runner's side. The target keeps only the session's private world and the model session it is
-resuming, which is what lets the runner fork a conversation without the target's help.
+What the target still owns is the model session: the cached prefix a six-turn conversation is
+resumed against, and the message a fork rewinds to. The world the tools act on is not here
+either. It lives in the tool server's arena, keyed by the same session id, so a fork branches
+in two places for two different reasons.
+
+Importing this module asserts test mode, so an agent that can refund money cannot be started
+against live credentials.
 """
 
 from __future__ import annotations
 
-import copy
-import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentred.llm.client import agent_sdk_env, resolve_route
+from agentred.mcp._guard import TEST_MODE, assert_test_mode
+from agentred.mcp.server import DEFAULT_TOOL_PORT
 from agentred.spec import AgentSpec
-from agentred.targets._guard import TEST_MODE, assert_test_mode
-from agentred.targets.tools import TOOLSETS
-from agentred.targets.tools.base import ToolSet
-from agentred.targets.world import World, fresh_world
 
 assert_test_mode()
 
 MAX_TOOL_TURNS = 12
 """Ceiling on tool calls inside a single reply. A loop is a bug, not an attack result."""
+
+TOOL_SERVER_ENV_VAR = "AGENTRED_TOOL_SERVER_URL"
+DEFAULT_TOOL_SERVER_URL = f"http://localhost:{DEFAULT_TOOL_PORT}"
+"""Where the target reaches its tools.
+
+Reported when the target answers a challenge, so a run can refuse a target that is about to
+call tools nobody is recording rather than produce a suite of empty call streams.
+"""
+
+TOOL_CONNECTOR_NAME = "shop"
+"""What the agent's tool connector is called. Tools reach the model as `mcp__shop__<name>`."""
 
 
 class ChatMessage(BaseModel):
@@ -58,9 +71,11 @@ class ChatRequest(BaseModel):
     """A request for the agent's next reply.
 
     Attributes:
-        session: Identifies this conversation's private world. A session id the target has
-            not seen starts a fresh world, which is how per-conversation isolation is
+        session: Identifies this conversation. The tool server keys the conversation's
+            private world and its call stream by the same id, which is how isolation is
             obtained without the runner having to ask for it.
+        run: The run the calls made while answering are recorded under. Sent by the runner
+            because the target has no way to know which run it is part of.
         conversation: The conversation so far, ending with the user turn to reply to. The
             runner holds the authoritative transcript; the target replays only the last turn.
     """
@@ -68,35 +83,18 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session: str = Field(min_length=1)
+    run: str = Field(min_length=1)
     conversation: list[ChatMessage] = Field(min_length=1)
-
-
-class ToolCall(BaseModel):
-    """One tool the agent called while producing a reply.
-
-    This is the record the deterministic detectors read. It carries the arguments as the
-    model actually sent them, because a bound is checked against what was passed and not
-    against what the agent said it passed.
-
-    Attributes:
-        name: The declared tool name, without any transport prefix.
-        arguments: Arguments as supplied by the model.
-        result: What the tool returned.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    arguments: dict[str, Any]
-    result: dict[str, Any]
 
 
 class ChatResponse(BaseModel):
     """What the target answers a turn with.
 
+    There is deliberately no tool-call field. What the agent did is read from the tool
+    server's record. See ADR-0005.
+
     Attributes:
         reply: The agent's text.
-        tool_calls: Every tool called during this turn, in call order.
         spec_versions: The four versions this behaviour belongs to, so a transcript can
             never be attributed to a version of the agent that did not produce it.
         session: Echo of the session id.
@@ -107,7 +105,6 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reply: str
-    tool_calls: list[ToolCall]
     spec_versions: dict[str, str]
     session: str
     usage: dict[str, float] = {}
@@ -119,7 +116,7 @@ class ForkRequest(BaseModel):
     Attributes:
         source: The session to branch from. Must exist.
         session: The new session id. Must not already exist, because silently reusing one
-            would hand the branch somebody else's world.
+            would hand the branch somebody else's cached prefix.
         at_turn: How many completed exchanges the branch keeps. `None` branches from the
             end of the conversation.
     """
@@ -138,6 +135,9 @@ class ChallengeResponse(BaseModel):
         challenge: The nonce, echoed unchanged.
         agent_id: Which agent is actually being served here.
         mode: Always `test` for a target that can move money.
+        tool_server: Where this target will reach its tools. Compared with the registry
+            before the first attack turn, because a target calling tools at a server the run
+            is not recording produces a run that quietly measures nothing.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -145,79 +145,75 @@ class ChallengeResponse(BaseModel):
     challenge: str
     agent_id: str
     mode: str
+    tool_server: str = ""
 
 
 @dataclass
 class Checkpoint:
-    """The state of a conversation at the end of one turn.
+    """The model session at the end of one turn.
 
     Kept so a fork can branch from the middle of a conversation rather than only from its
-    end. Without it, a branch taken at turn one would start from a world that turns two and
-    three had already spent money in, and two branches would differ by more than the turn
-    that was changed.
+    end. The world at that turn is checkpointed separately, in the tool server's arena: the
+    two halves of a fork are the cached prefix, which is the target's, and the money spent so
+    far, which is not.
 
     Attributes:
-        world: The shop as it stood after that turn.
         model_session_id: The model session the turn belonged to.
         message_uuid: The last assistant message of that turn, which is where the model
             session is rewound to when the branch is taken.
     """
 
-    world: World
     model_session_id: str | None
     message_uuid: str | None
 
 
 @dataclass
 class Session:
-    """One conversation's private state, held by the target.
+    """One conversation's model-side state, held by the target.
 
     Attributes:
-        world: This conversation's copy of the shop.
+        session_id: The id the runner minted, and the same id the tool server keys this
+            conversation's world and call stream by.
+        run: The run this conversation belongs to, as the runner reported it on the turn
+            being served.
         model_session_id: The model session being resumed, so that turns after the first
             reuse the cached prefix instead of resending it.
         last_message_uuid: The most recent assistant message, recorded so a later fork can
             rewind the model session to this point.
         fork_pending: Set on a session copied from another. The next turn branches the model
-            session rather than continuing it, so the two conversations share a cached
-            prefix without sharing a future.
+            session rather than continuing it, so the two conversations share a cached prefix
+            without sharing a future.
         fork_at: The message the branch rewinds to, when it was taken mid-conversation.
-        calls: Tool calls made during the turn currently being served.
         usage: What the turn currently being served cost, as the backend reported it. Reset
-            per turn alongside `calls`. Carried because a target's own spend is otherwise
-            invisible to the harness: it happens inside the Agent SDK, and without it a run
-            can only report half its bill.
+            per turn. Carried because a target's own spend is otherwise invisible to the
+            harness: it happens inside the Agent SDK, and without it a run can only report
+            half its bill.
         checkpoints: One entry per completed turn, in order.
     """
 
-    world: World
+    session_id: str
+    run: str = ""
     model_session_id: str | None = None
     last_message_uuid: str | None = None
     fork_pending: bool = False
     fork_at: str | None = None
-    calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, float] = field(default_factory=dict)
     checkpoints: list[Checkpoint] = field(default_factory=list)
 
     def checkpoint(self) -> None:
-        """Record the state at the end of a turn."""
+        """Record the model session at the end of a turn."""
         self.checkpoints.append(
             Checkpoint(
-                world=copy.deepcopy(self.world),
                 model_session_id=self.model_session_id,
                 message_uuid=self.last_message_uuid,
             )
         )
 
-    def branch(self, at_turn: int | None = None) -> Session:
+    def branch(self, session_id: str, at_turn: int | None = None) -> Session:
         """A branch of this session, taken after `at_turn` exchanges.
 
-        The world is deep copied, so a refund issued in the branch does not appear in the
-        conversation it was forked from, and a refund issued after the fork point does not
-        appear in the branch. That is what makes two branches comparable: they differ by the
-        turn that was changed and by nothing else.
-
         Args:
+            session_id: The id for the branch.
             at_turn: How many completed exchanges the branch keeps. `None` means all of
                 them, which is the cheapest fork because it resumes the live prefix.
 
@@ -236,12 +232,16 @@ class Session:
             )
         point = self.checkpoints[at_turn - 1]
         return Session(
-            world=copy.deepcopy(point.world),
+            session_id=session_id,
+            run=self.run,
             model_session_id=point.model_session_id,
             last_message_uuid=point.message_uuid,
             fork_pending=point.model_session_id is not None,
             fork_at=point.message_uuid,
-            checkpoints=[copy.deepcopy(entry) for entry in self.checkpoints[:at_turn]],
+            checkpoints=[
+                Checkpoint(entry.model_session_id, entry.message_uuid)
+                for entry in self.checkpoints[:at_turn]
+            ],
         )
 
 
@@ -249,17 +249,16 @@ class Session:
 class AgentBackend(Protocol):
     """What turns a conversation into a reply.
 
-    An interface so the HTTP surface, the session isolation and the tool binding can all be
-    tested offline against a scripted backend. The real one talks to a model; a fake one in
-    `tests/fakes/` replays a recorded conversation.
+    An interface so the HTTP surface, the session handling and the connector wiring can all
+    be tested offline against a scripted backend. The real one talks to a model; a fake one
+    in `tests/fakes/` replays a recorded conversation.
     """
 
     async def reply(self, session: Session, conversation: list[ChatMessage]) -> str:
-        """Produce the agent's next reply, calling tools against `session.world`.
+        """Produce the agent's next reply, calling tools at the tool server.
 
         Args:
-            session: The conversation's private state. Tool calls are appended to
-                `session.calls` as they happen.
+            session: The conversation's model-side state.
             conversation: The conversation so far, ending with the user turn to answer.
 
         Returns:
@@ -269,71 +268,64 @@ class AgentBackend(Protocol):
 
 
 class TargetAgent:
-    """One agent under test: its spec, its tools and its sessions.
+    """One agent under test: its spec, where its tools live, and its sessions.
 
     Attributes:
         spec: The agent's config and policy.
-        tools: The implementations behind the declared tools.
         backend: What produces replies.
+        tool_server_url: Origin of the tool server's tool face. The agent's connector is
+            pointed at a path under it naming the agent, the run and the session, so every
+            call it makes is attributable without the agent being asked anything.
         sessions: Live sessions by id.
     """
 
-    def __init__(self, spec: AgentSpec, tools: ToolSet, backend: AgentBackend) -> None:
-        """Bind a spec to its implementations.
+    def __init__(
+        self, spec: AgentSpec, backend: AgentBackend, tool_server_url: str | None = None
+    ) -> None:
+        """Bind a spec to a backend.
+
+        The declared tools are not checked against implementations here any more. That check
+        belongs to the tool server, which is the thing that has implementations to check.
 
         Args:
             spec: The validated spec.
-            tools: The toolset for this agent.
             backend: What produces replies.
-
-        Raises:
-            ValueError: If the declared tools and the implemented tools are not the same
-                set. Named in both directions: a declared tool with no implementation
-                fails mid-conversation, and an implemented tool that is not declared is a
-                capability no attack will ever aim at and no scorecard will mention.
+            tool_server_url: Where the tools are served. Defaults to
+                `AGENTRED_TOOL_SERVER_URL`, then to localhost on the tool server's port.
         """
-        declared = {tool.name for tool in spec.config.tools}
-        implemented = tools.names
-        if missing := sorted(declared - implemented):
-            raise ValueError(
-                f"{spec.config.agent_id} declares {missing} with no implementation behind them"
-            )
-        if extra := sorted(implemented - declared):
-            raise ValueError(
-                f"{spec.config.agent_id} implements {extra}, which its config does not declare, "
-                f"so nothing will attack them and the scorecard will not mention them"
-            )
         self.spec = spec
-        self.tools = tools
         self.backend = backend
+        self.tool_server_url = (
+            tool_server_url
+            if tool_server_url is not None
+            else os.environ.get(TOOL_SERVER_ENV_VAR, DEFAULT_TOOL_SERVER_URL)
+        ).rstrip("/")
         self.sessions: dict[str, Session] = {}
 
     def session(self, session_id: str) -> Session:
-        """The session's state, created with a fresh world the first time it is seen."""
+        """The session's model-side state, created the first time the session is seen."""
         if session_id not in self.sessions:
-            self.sessions[session_id] = Session(world=fresh_world())
+            self.sessions[session_id] = Session(session_id=session_id)
         return self.sessions[session_id]
 
-    def call_tool(self, session: Session, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Run one tool for a session and record the call.
+    def connector_url(self, session: Session) -> str:
+        """Where this session's tool calls go.
 
-        The record is written here rather than read back off the model's message stream,
-        because this is the only place that sees both the arguments as sent and the result
-        as returned.
+        The agent, the run and the session are in the path, so the tool server can attribute
+        every call without trusting anything the agent sends it.
         """
-        result = self.tools.call(name, session.world, arguments)
-        session.calls.append(ToolCall(name=name, arguments=arguments, result=result))
-        return result
+        agent_id = self.spec.config.agent_id
+        return f"{self.tool_server_url}/{agent_id}/{session.run}/{session.session_id}"
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """Answer one turn.
 
         Args:
-            request: The session id and the conversation so far.
+            request: The session id, the run, and the conversation so far.
 
         Returns:
-            The reply, the tool calls made while producing it, and the spec versions the
-            behaviour belongs to.
+            The reply and the spec versions the behaviour belongs to. What the agent did
+            while producing it is read from the tool server, not from here.
 
         Raises:
             ValueError: If the conversation does not end with a user turn, which would mean
@@ -343,14 +335,13 @@ class TargetAgent:
             raise ValueError("the conversation must end with a user turn")
 
         session = self.session(request.session)
-        session.calls = []
+        session.run = request.run
         session.usage = {}
         reply = await self.backend.reply(session, request.conversation)
         session.checkpoint()
         versions = self.spec.version_tuple
         return ChatResponse(
             reply=reply,
-            tool_calls=list(session.calls),
             usage=dict(session.usage),
             spec_versions={
                 "config": versions.config_version,
@@ -362,10 +353,11 @@ class TargetAgent:
         )
 
     def fork(self, source: str, session: str, at_turn: int | None = None) -> None:
-        """Branch a session, so two attacks can share a prefix and differ after it.
+        """Branch a session's cached prefix, so two attacks can share it and differ after it.
 
-        The runner uses this when it wants to try several continuations of the same opening:
-        the prefix is paid for once, on both the model side and the merchant's side.
+        This is half of a fork. The other half is branching the world, which the runner asks
+        the tool server for, because a world an agent could branch is a world an agent could
+        rewind.
 
         Args:
             source: The session to branch from.
@@ -374,38 +366,41 @@ class TargetAgent:
 
         Raises:
             ValueError: If the source does not exist, the new id is already in use, or the
-                source has not run that many turns. All three would silently give a
-                conversation a world it did not earn.
+                source has not run that many turns.
         """
         if source not in self.sessions:
             raise ValueError(f"no session {source!r} to fork from")
         if session in self.sessions:
             raise ValueError(f"session {session!r} already exists")
-        self.sessions[session] = self.sessions[source].branch(at_turn)
+        self.sessions[session] = self.sessions[source].branch(session, at_turn)
 
     def challenge(self, nonce: str) -> ChallengeResponse:
         """Answer a consent challenge.
 
         Echoing the nonce is the target's half of the gate in `runner/consent.py`. The agent
-        id is returned with it so a registry entry cannot be quietly repointed at a
-        different agent, and the mode is returned so the harness can refuse to attack
-        anything that is not a test.
+        id is returned with it so a registry entry cannot be quietly repointed at a different
+        agent, the mode so the harness can refuse to attack anything that is not a test, and
+        the tool server so the harness can refuse a target whose calls would land somewhere
+        it is not reading.
         """
         return ChallengeResponse(
-            challenge=nonce, agent_id=self.spec.config.agent_id, mode=TEST_MODE
+            challenge=nonce,
+            agent_id=self.spec.config.agent_id,
+            mode=TEST_MODE,
+            tool_server=self.tool_server_url,
         )
 
 
 class ClaudeAgentBackend:
-    """The real backend: the Claude Agent SDK, with the spec's tools served in process.
+    """The real backend: the Claude Agent SDK, reaching its tools over an MCP connector.
 
     The agent sees exactly the tools its config declares, with the schemas its config
-    declares, and nothing else. Sessions are resumed rather than replayed, so a six-turn
-    conversation pays for its prefix once.
+    declares, because the tool server serves them from the same spec. Sessions are resumed
+    rather than replayed, so a six-turn conversation pays for its prefix once.
 
     Attributes:
         agent: The target this backend produces replies for. Set by `attach`, because the
-            tool handlers need the agent and the agent needs the backend.
+            connector URL depends on the agent and the agent needs the backend.
     """
 
     def __init__(self) -> None:
@@ -425,29 +420,8 @@ class ClaudeAgentBackend:
         self.env = agent_sdk_env(self.route)
 
     def attach(self, agent: TargetAgent) -> None:
-        """Bind this backend to the agent whose tools it should expose."""
+        """Bind this backend to the agent it produces replies for."""
         self.agent = agent
-
-    def _server(self, session: Session) -> Any:
-        """Build an in-process MCP server exposing this agent's tools for one session."""
-        from claude_agent_sdk import create_sdk_mcp_server, tool
-
-        agent = self._require_agent()
-        tools = []
-        for declaration in agent.spec.config.tools:
-            tools.append(self._as_sdk_tool(tool, declaration, session))
-        return create_sdk_mcp_server(name="shop", tools=tools)
-
-    def _as_sdk_tool(self, decorator: Any, declaration: Any, session: Session) -> Any:
-        """Wrap one declared tool as an SDK tool bound to one session's world."""
-        agent = self._require_agent()
-        name = declaration.name
-
-        async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
-            result = agent.call_tool(session, name, dict(arguments))
-            return {"content": [{"type": "text", "text": json.dumps(result)}]}
-
-        return decorator(name, declaration.description, declaration.parameters)(handler)
 
     def _require_agent(self) -> TargetAgent:
         """The attached agent.
@@ -471,13 +445,16 @@ class ClaudeAgentBackend:
         from claude_agent_sdk import TextBlock as SdkTextBlock
 
         agent = self._require_agent()
-        server = self._server(session)
         options = ClaudeAgentOptions(
             system_prompt=agent.spec.config.instructions,
             model=self.route.model_id(agent.spec.config.model),
             env=self.env,
-            mcp_servers={"shop": server},
-            allowed_tools=[f"mcp__shop__{tool.name}" for tool in agent.spec.config.tools],
+            mcp_servers={
+                TOOL_CONNECTOR_NAME: {"type": "http", "url": agent.connector_url(session)}
+            },
+            allowed_tools=[
+                f"mcp__{TOOL_CONNECTOR_NAME}__{tool.name}" for tool in agent.spec.config.tools
+            ],
             permission_mode="bypassPermissions",
             max_turns=MAX_TOOL_TURNS,
             resume=session.model_session_id,
@@ -537,28 +514,23 @@ def _usage_of(result: Any) -> dict[str, float]:
     return flat
 
 
-def build_agent(spec: AgentSpec, backend: AgentBackend | None = None) -> TargetAgent:
+def build_agent(
+    spec: AgentSpec,
+    backend: AgentBackend | None = None,
+    tool_server_url: str | None = None,
+) -> TargetAgent:
     """Assemble a target from its spec.
 
     Args:
         spec: The validated spec.
         backend: What produces replies. Defaults to the real Claude Agent SDK backend.
+        tool_server_url: Where the tools are served. Defaults to the environment.
 
     Returns:
         A ready `TargetAgent`.
-
-    Raises:
-        KeyError: If no toolset is registered for the spec's agent id. A spec without
-            implementations is a document, not a target.
     """
-    agent_id = spec.config.agent_id
-    if agent_id not in TOOLSETS:
-        raise KeyError(
-            f"no tool implementations registered for agent {agent_id!r}; "
-            f"registered: {sorted(TOOLSETS)}"
-        )
     backend = ClaudeAgentBackend() if backend is None else backend
-    agent = TargetAgent(spec=spec, tools=TOOLSETS[agent_id], backend=backend)
+    agent = TargetAgent(spec=spec, backend=backend, tool_server_url=tool_server_url)
     if isinstance(backend, ClaudeAgentBackend):
         backend.attach(agent)
     return agent
@@ -568,7 +540,7 @@ def build_app(agent: TargetAgent) -> Any:
     """Serve one target over HTTP.
 
     Two endpoints and a health check. `GET /challenge` is the target's half of the consent
-    gate; `POST /chat` takes a turn and returns the reply with its tool-call log.
+    gate; `POST /chat` takes a turn and returns the reply.
 
     Args:
         agent: The target to serve.

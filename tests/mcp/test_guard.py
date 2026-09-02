@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentred.targets._guard import UnsafeTargetError, assert_test_mode
+from agentred.mcp._guard import UnsafeTargetError, assert_test_mode
 
 
 def test_declared_test_mode_passes() -> None:
