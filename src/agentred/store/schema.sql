@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS conversations (
     -- because the scope detector compares every record reached against it, and a transcript
     -- rebuilt without it reports every scope check as never in play rather than as passed.
     subject_json    TEXT NOT NULL DEFAULT '{}',
+    -- Which channel the attack arrived down, and what it wrote into the world before the
+    -- agent ran. Both are stored because a planted attempt is unreadable without them: the
+    -- transcript shows a benign trigger and an agent doing something it should not, and the
+    -- only thing that explains the gap is text a stranger had already put in a field the
+    -- agent read. Defaults describe a conversational attempt, which is what every row
+    -- written before channels existed was.
+    channel         TEXT NOT NULL DEFAULT 'conversation',
+    planted_json    TEXT NOT NULL DEFAULT '[]',
     created_at      TEXT NOT NULL
 );
 

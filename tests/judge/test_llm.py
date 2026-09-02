@@ -4,7 +4,7 @@ import json
 
 from agentred.judge.llm import VERDICT_SCHEMA, judge_conversation
 from agentred.judge.models import Outcome, Settled
-from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
+from agentred.runner.channels.conversational import ToolCallRecord, Transcript, Turn
 from agentred.spec import Obligation, ObligationKind, Provenance
 from tests.fakes.model import RecordedModelClient
 

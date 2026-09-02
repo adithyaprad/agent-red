@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from agentred.runner.conversation import ToolCallRecord, Transcript
+from agentred.runner.channels.conversational import ToolCallRecord, Transcript
 
 ERROR_KEY = "error"
 """The result key an implementation uses to report that it did not do the thing.

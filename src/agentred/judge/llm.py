@@ -39,7 +39,7 @@ from typing import Any
 
 from agentred.judge.models import Finding, Outcome, Settled, Utterance
 from agentred.llm.client import ModelClient
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 from agentred.spec.models import Obligation, ObligationKind
 
 DEFAULT_WORKERS = 4

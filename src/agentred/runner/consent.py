@@ -48,6 +48,7 @@ run. The longest observed across runs 0002 to 0005 is 103 seconds on a six turn 
 
 DEFAULT_CHALLENGE_PATH = "/challenge"
 DEFAULT_CHAT_PATH = "/chat"
+DEFAULT_TRIGGER_PATH = "/trigger"
 CHALLENGE_TIMEOUT_SECONDS = 10.0
 
 DEFAULT_TOOL_SERVER_URL = "http://localhost:8090"
@@ -108,6 +109,10 @@ class RegisteredTarget(BaseModel):
         description: What the agent does, for the operator reading `agentred doctor`.
         challenge_path: Path that echoes the nonce.
         chat_path: Path that takes a conversation and returns a reply.
+        trigger_path: Path that fires the agent's scheduled entry point, with no user turn
+            in it. Named here rather than assumed, because a planted attack has to fire the
+            trigger the deployment actually runs (ADR-0006), and a harness that invented one
+            would be reporting on an agent nobody deploys.
         tool_server: Origin of the tool server this target must reach its tools through, and
             therefore the server this run's evidence is recorded at. The target reports what
             it will use when it answers the challenge, and a disagreement is refused: a
@@ -127,6 +132,7 @@ class RegisteredTarget(BaseModel):
     description: str = Field(default="")
     challenge_path: str = Field(default=DEFAULT_CHALLENGE_PATH)
     chat_path: str = Field(default=DEFAULT_CHAT_PATH)
+    trigger_path: str = Field(default=DEFAULT_TRIGGER_PATH)
     tool_server: str = Field(default=DEFAULT_TOOL_SERVER_URL, min_length=1)
     control_url: str = Field(default=DEFAULT_CONTROL_URL, min_length=1)
 
@@ -144,7 +150,7 @@ class RegisteredTarget(BaseModel):
             raise ValueError(f"base_url {value!r} must be an origin with no path")
         return trimmed
 
-    @field_validator("challenge_path", "chat_path")
+    @field_validator("challenge_path", "chat_path", "trigger_path")
     @classmethod
     def _absolute_path(cls, value: str) -> str:
         if not value.startswith("/"):
@@ -164,6 +170,16 @@ class RegisteredTarget(BaseModel):
         remain two different things.
         """
         return f"{self.base_url}{self.chat_path}"
+
+    @property
+    def trigger_url(self) -> str:
+        """Full URL of the scheduled entry point.
+
+        Read only from a `ConsentToken`, for the same reason as `chat_url`. Firing an
+        agent's cron is as much an act against it as talking to it, and more so: nobody is
+        watching a scheduled run.
+        """
+        return f"{self.base_url}{self.trigger_path}"
 
 
 class TargetRegistry(BaseModel):
@@ -389,6 +405,11 @@ class ConsentToken:
     def chat_url(self) -> str:
         """Where turns for this target go. Reachable only through a token."""
         return self.target.chat_url
+
+    @property
+    def trigger_url(self) -> str:
+        """Where a firing of this target's schedule goes. Reachable only through a token."""
+        return self.target.trigger_url
 
     def is_live(self, now: float | None = None) -> bool:
         """Whether the token is still inside its window.

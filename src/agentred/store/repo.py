@@ -17,12 +17,19 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
+from agentred.runner.channels.conversational import (
+    PlantedField,
+    ToolCallRecord,
+    Transcript,
+    Turn,
+)
 from agentred.spec import VersionTuple
+from agentred.spec.models import CONVERSATIONAL_CHANNEL
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 DEFAULT_DB_PATH = Path("runs.sqlite3")
@@ -75,6 +82,8 @@ class Store:
         """
         added = {
             ("conversations", "subject_json"): "TEXT NOT NULL DEFAULT '{}'",
+            ("conversations", "channel"): "TEXT NOT NULL DEFAULT 'conversation'",
+            ("conversations", "planted_json"): "TEXT NOT NULL DEFAULT '[]'",
         }
         for (table, column), declaration in added.items():
             present = {
@@ -160,8 +169,8 @@ class Store:
         with self.connection:
             self.connection.execute(
                 "INSERT INTO conversations (conversation_id, run_id, target, session, goal, "
-                "attack_id, stopped_because, subject_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "attack_id, stopped_because, subject_json, channel, planted_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation_id,
                     run_id,
@@ -171,6 +180,8 @@ class Store:
                     attack_id,
                     transcript.stopped_because,
                     json.dumps(transcript.subject, sort_keys=True),
+                    transcript.channel,
+                    json.dumps([asdict(planted) for planted in transcript.planted], sort_keys=True),
                     _now(),
                 ),
             )
@@ -260,6 +271,10 @@ class Store:
                 "tools": run.get("tool_version", ""),
             },
             stopped_because=row["stopped_because"],
+            channel=row["channel"] or CONVERSATIONAL_CHANNEL,
+            planted=tuple(
+                PlantedField(**planted) for planted in json.loads(row["planted_json"] or "[]")
+            ),
         )
 
     def conversation_ids(self, run_id: str) -> tuple[str, ...]:

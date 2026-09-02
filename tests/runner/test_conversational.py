@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentred.mcp.server import ToolServer
+from agentred.runner.channels.conversational import TargetError, Transcript, run_conversation
 from agentred.runner.consent import (
     CONSENT_TTL_SECONDS,
     ConsentError,
@@ -12,7 +13,6 @@ from agentred.runner.consent import (
     TargetRegistry,
     establish_consent,
 )
-from agentred.runner.conversation import TargetError, Transcript, run_conversation
 from agentred.spec import load_spec_dir
 from agentred.targets.runtime import build_agent
 from tests.fakes.target import (

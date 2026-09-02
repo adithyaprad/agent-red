@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
+from agentred.runner.channels.conversational import ToolCallRecord, Transcript, Turn
 from agentred.spec.loader import load_spec_dir
 
 SPEC_ROOT = "src/agentred/targets/specs"

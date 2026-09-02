@@ -34,7 +34,7 @@ from agentred.judge.detectors import run_detectors
 from agentred.judge.llm import judge_conversation
 from agentred.judge.models import Finding, Outcome
 from agentred.llm.client import ModelClient
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 from agentred.scoring.breaking_point import find_all
 from agentred.scoring.consistency import Attempt, compare
 from agentred.spec import load_spec_dir

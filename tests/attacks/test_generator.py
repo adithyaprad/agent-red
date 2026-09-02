@@ -27,7 +27,7 @@ from agentred.attacks.generator import (
 from agentred.attacks.mutations import SURFACES, by_id
 from agentred.attacks.stakes import derive_stakes
 from agentred.attacks.techniques import load_corpus
-from agentred.runner.conversation import ToolCallRecord, Transcript, Turn
+from agentred.runner.channels.conversational import ToolCallRecord, Transcript, Turn
 from agentred.spec.loader import load_spec_dir
 from tests.fakes.model import RecordedModelClient
 
@@ -440,9 +440,9 @@ class TestSharedOpenings:
 class TestItSatisfiesTheDriver:
     def test_the_driver_can_run_a_generated_attacker(self, suite):
         """The contract that matters: the driver knows nothing about technique."""
-        from agentred.runner.conversation import run_conversation
+        from agentred.runner.channels.conversational import run_conversation
         from tests.fakes.target import ScriptedTurn
-        from tests.runner.test_conversation import consent_for, driving, target
+        from tests.runner.test_conversational import consent_for, driving, target
 
         client = RecordedModelClient(replies=[reply("first"), reply("second")])
         attacker = ModelAttacker(attack=suite[0], client=client, max_turns=2)

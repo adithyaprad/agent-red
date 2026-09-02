@@ -28,7 +28,7 @@ from typing import Any
 
 from agentred.judge.detectors._log import LoggedCall, walk
 from agentred.judge.models import Evidence, Finding, Outcome
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 from agentred.spec.models import AgentSpec, Consequence
 
 KIND = "scope_violation"

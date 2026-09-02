@@ -22,6 +22,7 @@ before anything is judged, so an analysis that dies on a rate limit is resumed w
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -29,6 +30,7 @@ from typing import Annotated
 import typer
 
 from agentred.attacks.generator import build_suite
+from agentred.attacks.planted import load_planted
 from agentred.attacks.stakes import derive_stakes
 from agentred.llm import LLMConfigurationError, resolve_route
 from agentred.llm.client import AnthropicModelClient
@@ -54,6 +56,7 @@ from agentred.runner.suite import (
 from agentred.scoring.analysis import AnalysisError, analyse, known_runs, resolve_runs
 from agentred.scoring.render import build
 from agentred.spec import SpecError, load_spec_dir
+from agentred.spec.models import CONVERSATIONAL_CHANNEL
 from agentred.store.repo import Store
 
 DEFAULT_STORE = Path("data/agentred.db")
@@ -298,8 +301,18 @@ def run(
     label: Annotated[str, typer.Option("--label", help="Human tag on the run directory.")] = "",
     store_path: Annotated[Path, typer.Option("--store")] = DEFAULT_STORE,
     out: Annotated[Path | None, typer.Option("--out", help="Force the run directory.")] = None,
+    channel: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--channel",
+            help="Channel to attack. Repeatable. Omit for every channel this agent has.",
+        ),
+    ] = None,
     list_stakes: Annotated[
         bool, typer.Option("--list-stakes", help="Print what this target derives, and stop.")
+    ] = False,
+    list_channels: Annotated[
+        bool, typer.Option("--list-channels", help="Print what this target declares, and stop.")
     ] = False,
     conversations_only: Annotated[
         bool,
@@ -320,16 +333,39 @@ def run(
         for derived in derive_stakes(spec):
             typer.echo(derived.id)
         return
+    if list_channels:
+        typer.echo(f"{CONVERSATIONAL_CHANNEL}\ta multi-turn conversation")
+        for declared in spec.config.channels:
+            typer.echo(
+                f"{declared.name}\t{declared.data_source}.{declared.record_path}, read on a "
+                f"{declared.trigger.value}, written by {declared.writer.rstrip('.').lower()}"
+            )
+        return
 
     stakes = tuple(stake or ())
-    attacks = select(build_suite(spec), stakes, limit)
+    # Both families in one suite. A planted attack has no attacker and costs no model call
+    # on the harness side, so running them beside the conversations is nearly free, and the
+    # coverage grid is only honest when it reports every channel the agent actually has.
+    everything = build_suite(spec) + load_planted(spec)
+    channels = tuple(channel or ())
+    if channels:
+        unknown = sorted(set(channels) - {a.channel for a in everything})
+        if unknown:
+            typer.echo(f"{target} has no channel named {', '.join(unknown)}. Try --list-channels.")
+            raise typer.Exit(code=1)
+        everything = tuple(a for a in everything if a.channel in channels)
+    attacks = select(everything, stakes, limit)
     if out is not None:
         out.mkdir(parents=True, exist_ok=True)
         directory = out
     else:
         directory = next_run_dir(target, stakes, label)
 
-    typer.echo(f"running {len(attacks)} attack(s) against {target}, writing to {directory}")
+    by_channel = Counter(a.channel for a in attacks)
+    spread = ", ".join(f"{count} on {name}" for name, count in sorted(by_channel.items()))
+    typer.echo(
+        f"running {len(attacks)} attack(s) against {target} ({spread}), writing to {directory}"
+    )
     interrupted: BaseException | None = None
     try:
         completed = execute(

@@ -18,8 +18,7 @@ import copy
 from dataclasses import dataclass
 
 from agentred.mcp.control import ArenaControl, HttpxArenaControl
-from agentred.runner.consent import ConsentToken
-from agentred.runner.conversation import (
+from agentred.runner.channels.conversational import (
     DEFAULT_MAX_TURNS,
     Attacker,
     HttpxTargetTransport,
@@ -28,6 +27,7 @@ from agentred.runner.conversation import (
     new_session_id,
     run_conversation,
 )
+from agentred.runner.consent import ConsentToken
 
 
 @dataclass(frozen=True)

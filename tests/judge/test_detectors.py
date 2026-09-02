@@ -169,9 +169,9 @@ class TestTheWholeChain:
     """Hand-built transcripts are convenient. This one comes out of the driver."""
 
     def test_a_conversation_run_through_the_driver_is_readable_by_the_detectors(self):
-        from agentred.runner.conversation import run_conversation
+        from agentred.runner.channels.conversational import run_conversation
         from tests.fakes.target import ScriptedTurn
-        from tests.runner.test_conversation import ScriptedAttacker, consent_for, driving, target
+        from tests.runner.test_conversational import ScriptedAttacker, consent_for, driving, target
 
         transport = target(
             ScriptedTurn(

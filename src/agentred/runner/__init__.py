@@ -4,6 +4,15 @@ Nothing else in the tree sends a turn to a target. Everything that does takes a
 `ConsentToken`, which only `consent.establish_consent` can produce.
 """
 
+from agentred.runner.channels.conversational import (
+    Attacker,
+    TargetError,
+    TargetTransport,
+    ToolCallRecord,
+    Transcript,
+    Turn,
+    run_conversation,
+)
 from agentred.runner.consent import (
     ChallengeFailedError,
     ChallengeTransport,
@@ -16,15 +25,6 @@ from agentred.runner.consent import (
     TargetRegistry,
     establish_consent,
     load_registry,
-)
-from agentred.runner.conversation import (
-    Attacker,
-    TargetError,
-    TargetTransport,
-    ToolCallRecord,
-    Transcript,
-    Turn,
-    run_conversation,
 )
 from agentred.runner.fork import Branch, fan_out, fork_conversation, prefix_of
 

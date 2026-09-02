@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentred.runner.conversation import TargetError, run_conversation
+from agentred.runner.channels.conversational import TargetError, run_conversation
 from agentred.runner.fork import Branch, fan_out, fork_conversation, prefix_of
 from tests.fakes.target import BrokenTransport, ScriptedTurn
-from tests.runner.test_conversation import ScriptedAttacker, consent_for, driving, target
+from tests.runner.test_conversational import ScriptedAttacker, consent_for, driving, target
 
 
 def opening(transport: object) -> object:

@@ -31,7 +31,8 @@ from agentred.attacks.mutations import Mutation
 from agentred.attacks.stakes import Stake, derive_stakes
 from agentred.attacks.techniques import Technique, load_corpus
 from agentred.llm.client import ModelClient
-from agentred.runner.conversation import DEFAULT_MAX_TURNS, Transcript
+from agentred.runner.channels.conversational import DEFAULT_MAX_TURNS, Transcript
+from agentred.spec.models import CONVERSATIONAL_CHANNEL
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,40 +85,145 @@ class AttackError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PlantedPayload:
+    """One string written into a field of the world, and which record it goes on.
+
+    Hand-written for now, and named so rather than dressed up as a technique. The planted
+    technique family does not exist yet, and inventing corpus entries to carry three payloads
+    would put fabricated techniques on a coverage grid.
+
+    Attributes:
+        label: Identifies this payload. Takes the place a technique id holds in an attack's
+            identity, so a planted attempt is still traceable to exactly what was written.
+            Lowercase words joined by underscores, like a technique id, because it is read in
+            the same column of the same table.
+        record_id: Which record to plant into, for example `DSP-9001`. Part of the payload
+            rather than chosen at run time, because which record an attempt was about is
+            part of what a seed has to reproduce.
+        text: What gets written.
+        in_plain_words: What the person on the other end did, for a merchant who will read
+            one transcript. Required for the same reason a technique's is: a page that
+            labelled this `delimiter_escape` and stopped would have taught a word.
+    """
+
+    label: str
+    record_id: str
+    text: str
+    in_plain_words: str
+
+    def __post_init__(self) -> None:
+        """Refuse a payload that could not be reported.
+
+        Raises:
+            AttackError: If any field is blank. A payload with no label cannot be told apart
+                from another on a scorecard, and one with no plain-words line reaches a
+                merchant page as a bare identifier.
+        """
+        for name in ("label", "record_id", "text", "in_plain_words"):
+            if not str(getattr(self, name)).strip():
+                raise AttackError(f"a planted payload needs a {name}")
+
+
+@dataclass(frozen=True)
 class Attack:
     """One cell of the grid: a way of applying pressure, aimed at one thing worth reaching.
 
+    The cell has three coordinates now rather than two: what to push toward, how to push,
+    and the channel the push arrives down (ADR-0006). A conversational attack carries a
+    technique and no payload; a planted one carries a payload and, until the planted
+    technique family exists, no technique. Which of the two it is decides which driver runs
+    it, and `runner/suite.py` dispatches on nothing else.
+
     Attributes:
-        technique: How to push.
         stake: What to push toward, and how anyone will know it happened.
+        technique: How to push, across turns. Required on the conversational channel and
+            absent on a planted one, where a hand-written payload stands in its place.
         mutation: What surface to run it in, or `None` for the plain variant. A third
             coordinate rather than a separate kind of object, so one grid describes the whole
             suite and a mutated attack is traceable to the plain one it varies.
         subject: Whose situation this conversation is about, from the agent's own declared
             identities. `None` only for an agent whose policy scopes nothing, where there is
             nobody to be.
+        channel: The declared channel this arrives down. Defaults to the implicit
+            conversational one, so every attack written before channels existed is what it
+            always was rather than a channel nobody named.
+        planted: The payload to write into the world. Required off the conversational
+            channel and refused on it.
     """
 
-    technique: Technique
     stake: Stake
+    technique: Technique | None = None
     mutation: Mutation | None = None
     subject: Subject | None = None
+    channel: str = CONVERSATIONAL_CHANNEL
+    planted: PlantedPayload | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse an attack that names a channel it does not carry the means to use.
+
+        Both directions are construction errors rather than runtime surprises, and both
+        would fail quietly. An attack on the conversational channel with no technique would
+        reach `build_attackers` and produce an attacker with nothing to say. A planted
+        attack with no payload would restore a world, write nothing, fire the trigger and
+        report a clean run, which is indistinguishable from an agent that held.
+
+        Raises:
+            AttackError: If the channel and the means disagree.
+        """
+        if self.channel == CONVERSATIONAL_CHANNEL:
+            if self.technique is None:
+                raise AttackError(
+                    f"attack on stake {self.stake.id!r} is conversational and carries no "
+                    f"technique, so there would be nothing to say"
+                )
+            if self.planted is not None:
+                raise AttackError(
+                    f"attack on stake {self.stake.id!r} is conversational and carries a "
+                    f"planted payload, which nothing would write"
+                )
+        elif self.planted is None:
+            raise AttackError(
+                f"attack on stake {self.stake.id!r} arrives down channel "
+                f"{self.channel!r} and carries no payload, so the trigger would fire "
+                f"against an untouched world and report a clean run"
+            )
+
+    @property
+    def is_planted(self) -> bool:
+        """Whether this attack is delivered by writing into the world rather than by talking."""
+        return self.channel != CONVERSATIONAL_CHANNEL
+
+    @property
+    def move(self) -> str:
+        """How this attack pushes, as an identifier: a technique id, or a payload's label."""
+        return self.technique.id if self.technique is not None else self.planted.label  # type: ignore[union-attr]
+
+    @property
+    def move_name(self) -> str:
+        """How this attack pushes, for a person reading a run summary."""
+        return self.technique.name if self.technique is not None else self.planted.label  # type: ignore[union-attr]
 
     @property
     def id(self) -> str:
-        """Stable identifier, `<stake id>|<technique id>`, plus the subject and the mutation.
+        """Stable identifier, `<stake id>|<move>`, plus the channel, subject and mutation.
 
         Carried onto every transcript and every verdict, so a scorecard row can be traced back
         to the exact combination that produced it and two runs of the same agent line up. The
         plain variant keeps the shorter tail, so adding mutations later does not rename every
         attack that already ran.
 
+        A conversational attack's id is unchanged by channels existing. The channel appears
+        only on a planted one, for the same reason: an id already in the frozen corpus must
+        not be renamed by a milestone that did not change what it does.
+
         The subject is part of the identity rather than a detail of it. The same technique
         aimed at the same limit is a different question asked as a person whose record is
         settled and as one whose is still open, and a row that cannot say which one it was is
         not traceable to anything.
         """
-        base = f"{self.stake.id}|{self.technique.id}"
+        base = f"{self.stake.id}|{self.move}"
+        if self.is_planted:
+            base = f"{self.stake.id}|{self.channel}:{self.move}"
         if self.subject is not None:
             base = f"{base}|{self.subject.name}"
         return base if self.mutation is None else f"{base}|{self.mutation.id}"
@@ -144,7 +250,7 @@ class Attack:
         only thing the variant was testing.
         """
         return (
-            self.technique.id,
+            self.move,
             self.stake.tool,
             self.stake.requires_first,
             "" if self.mutation is None else self.mutation.id,
@@ -215,7 +321,7 @@ def build_suite(
             key = (technique.id, stake.tool, stake.requires_first)
             if key not in assigned:
                 assigned[key] = subjects[len(assigned) % len(subjects)]
-            cells.append(Attack(technique=technique, stake=stake, subject=assigned[key]))
+            cells.append(Attack(stake=stake, technique=technique, subject=assigned[key]))
     suite = tuple(cells)
 
     seen: set[str] = set()
@@ -723,7 +829,20 @@ def build_attackers(
 
     Returns:
         One attacker per attack, in the same sequence.
+
+    Raises:
+        AttackError: If any attack in the suite is planted. A planted attack has no turns to
+            compose, and handing one a conversational attacker would send a chat message to
+            an agent the attack was supposed to reach through a data field, which is a
+            finding about the harness rather than about the agent (ADR-0006).
     """
+    planted = tuple(attack.id for attack in suite if attack.is_planted)
+    if planted:
+        raise AttackError(
+            f"{len(planted)} planted attack(s) were handed to the conversational attacker "
+            f"builder, starting with {planted[0]!r}. Planted attacks are run by "
+            f"runner.channels.planted, which composes no turns."
+        )
     openings: dict[tuple[str, str, tuple[str, ...], str, str], str] = {}
     if share_openings:
         for group in group_by_opening(suite):

@@ -7,6 +7,7 @@ from agentred.spec import (
     AgentConfig,
     AgentPolicy,
     AgentSpec,
+    ChannelDeclaration,
     CitationRequirement,
     Consequence,
     CumulativeBound,
@@ -24,6 +25,7 @@ from agentred.spec import (
     ResultCondition,
     ResultReference,
     ToolDeclaration,
+    TriggerKind,
 )
 
 
@@ -38,7 +40,7 @@ def tool(name, consequence=Consequence.INERT, arguments=("amount",)):
     )
 
 
-def config(tools=None, data_sources=(), version="1", model="claude-sonnet-5"):
+def config(tools=None, data_sources=(), version="1", model="claude-sonnet-5", channels=()):
     return AgentConfig(
         agent_id="a",
         version=version,
@@ -48,6 +50,25 @@ def config(tools=None, data_sources=(), version="1", model="claude-sonnet-5"):
         if tools is not None
         else (tool("apply_discount", Consequence.MONEY, ("pct",)),),
         data_sources=data_sources,
+        channels=channels,
+    )
+
+
+DISPUTES = DataSource(name="disputes", identifier_kinds=("dispute_id", "order_id"))
+
+
+def channel(**kwargs):
+    """A planted channel into the buyer's own words, which is the motivating case."""
+    return ChannelDeclaration(
+        **{
+            "name": "dispute_reason_text",
+            "writer": "the buyer, when they raise the dispute",
+            "data_source": "disputes",
+            "record_path": "reason_text",
+            "record_key": "dispute_id",
+            "trigger": TriggerKind.SCHEDULE,
+            **kwargs,
+        }
     )
 
 
@@ -603,3 +624,64 @@ class TestTheNewerRequirements:
             name="out", tool="send", body_arguments=("body",), provenance=Provenance.INFERRED
         )
         assert not AgentPolicy(agent_id="a", version="1", outbound=(rule,)).is_fully_declared
+
+
+class TestChannels:
+    """What an agent declares about the fields an adversary writes (ADR-0006)."""
+
+    def test_a_declared_channel_is_reachable_by_name(self):
+        spec = config(data_sources=(DISPUTES,), channels=(channel(),))
+        assert spec.channels_by_name["dispute_reason_text"].record_path == "reason_text"
+
+    def test_an_agent_declaring_no_channel_is_accepted(self):
+        assert config().channels == ()
+
+    def test_a_channel_into_a_source_the_agent_cannot_reach_is_refused(self):
+        with pytest.raises(ValidationError, match="which the agent cannot reach"):
+            config(channels=(channel(),))
+
+    def test_a_channel_keyed_by_an_identifier_the_source_lacks_is_refused(self):
+        with pytest.raises(ValidationError, match="does not carry"):
+            config(data_sources=(DISPUTES,), channels=(channel(record_key="cart_id"),))
+
+    def test_two_channels_of_the_same_name_are_refused(self):
+        one = channel()
+        with pytest.raises(ValidationError, match="duplicate channel name"):
+            config(data_sources=(DISPUTES,), channels=(one, one))
+
+    def test_the_conversational_channel_name_cannot_be_declared(self):
+        with pytest.raises(ValidationError, match="implicit conversational channel"):
+            channel(name="conversation")
+
+    def test_a_record_path_that_traverses_structure_is_refused(self):
+        with pytest.raises(ValidationError, match="traverses structure"):
+            channel(record_path="lines[0].note")
+
+    def test_a_request_trigger_without_a_template_is_refused(self):
+        with pytest.raises(ValidationError, match="declares no trigger_template"):
+            channel(trigger=TriggerKind.REQUEST)
+
+    def test_a_request_template_naming_no_record_is_refused(self):
+        with pytest.raises(ValidationError, match=r"no \{record\} in it"):
+            channel(trigger=TriggerKind.REQUEST, trigger_template="Deal with this dispute.")
+
+    def test_a_schedule_trigger_carrying_a_template_is_refused(self):
+        with pytest.raises(ValidationError, match="which nothing would send"):
+            channel(trigger_template="Deal with dispute {record}.")
+
+    def test_a_request_trigger_with_a_usable_template_is_accepted(self):
+        declared = channel(
+            trigger=TriggerKind.REQUEST, trigger_template="Please deal with dispute {record}."
+        )
+        assert declared.trigger_template.format(record="DSP-9001").endswith("DSP-9001.")
+
+    def test_declaring_a_channel_does_not_change_the_tool_digest(self):
+        """A scorecard cites the tool digest, and channels are not tools.
+
+        The same argument that kept `unit_symbol` off `ToolDeclaration`. A field that
+        changed the digest would invalidate every scorecard already produced for an agent
+        whose tools had not moved.
+        """
+        plain = config(data_sources=(DISPUTES,))
+        declared = config(data_sources=(DISPUTES,), channels=(channel(),))
+        assert plain.tool_version == declared.tool_version

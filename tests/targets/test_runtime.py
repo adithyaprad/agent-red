@@ -222,9 +222,17 @@ def test_firing_a_schedule_needs_no_conversation() -> None:
 
 
 def test_a_firing_carries_the_spec_versions_it_belongs_to() -> None:
+    """Read from the spec on disk, not pinned to a literal.
+
+    What this asserts is that a firing reports which spec it loaded, so that a stale server
+    is refused at preflight rather than after a paid-for suite. Pinning the version here
+    would make every legitimate version bump fail a test about something else, which teaches
+    whoever bumps it to edit the assertion.
+    """
+    spec = load_spec_dir(f"{SPEC_ROOT}/cart_recovery")
     client, _ = scheduled_client(ScriptedTurn(reply="done"))
     body = client.post("/trigger", json={"session": "s1", "run": "r1"}).json()
-    assert body["spec_versions"]["config"] == "2.0"
+    assert body["spec_versions"]["config"] == spec.config.version
     assert body["session"] == "s1"
 
 

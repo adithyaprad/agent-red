@@ -31,9 +31,11 @@ from agentred.judge.models import Finding
 from agentred.judge.models import Outcome as JudgeOutcome
 from agentred.llm.client import AnthropicModelClient
 from agentred.llm.recording import CallRecorder, RecordingModelClient
+from agentred.runner.channels.conversational import Transcript, run_conversation
+from agentred.runner.channels.planted import run_planted
 from agentred.runner.consent import ConsentLease, load_registry
-from agentred.runner.conversation import Transcript, run_conversation
 from agentred.spec import load_spec_dir
+from agentred.spec.models import ChannelDeclaration
 from agentred.store.repo import Store
 
 DEFAULT_ATTACKER_MODEL = "claude-sonnet-5"
@@ -149,6 +151,16 @@ def _slug(value: str) -> str:
     return "-".join(part for part in cleaned.split("-") if part)
 
 
+class SuiteError(RuntimeError):
+    """An attack could not be run as specified.
+
+    Distinct from a target that misbehaved and from a target that broke. This is the harness
+    being asked to do something incoherent, such as attacking a channel the agent does not
+    declare, and it is captured onto the outcome as an error rather than being reported as an
+    attack that held.
+    """
+
+
 @dataclass
 class Outcome:
     """What one conversation produced, or why it produced nothing.
@@ -244,25 +256,39 @@ def select(suite: tuple[Attack, ...], stakes: tuple[str, ...], limit: int) -> tu
 
 
 def run_one(
-    attack: Attack, attacker: Any, lease: ConsentLease, max_turns: int, run: str
+    attack: Attack,
+    attacker: Any,
+    lease: ConsentLease,
+    max_turns: int,
+    run: str,
+    channels: dict[str, ChannelDeclaration] | None = None,
 ) -> Outcome:
-    """Execute one conversation, capturing a failure rather than propagating it.
+    """Execute one attack down the channel it declares.
 
+    A failure is captured onto the outcome rather than propagated.
     One attack failing must not end the run: the others are independent, and the failure is
     itself a result worth reporting.
 
-    The conversation records whose it is, taken from the attack's own identity. Without it
-    every scope check reports as never evaluated, which is honest and useless: the most
-    sensitive check in the suite would silently never run.
+    Dispatch is on the attack's channel and on nothing else. A conversational attack is
+    driven turn by turn; a planted one restores the world, writes its payload into the field
+    the agent declared, and fires the agent's real trigger (ADR-0006).
+
+    The attempt records whose it is, taken from the attack's own identity. Without it every
+    scope check reports as never evaluated, which is honest and useless: the most sensitive
+    check in the suite would silently never run.
 
     Args:
         attack: What is being run, carried onto the outcome.
-        attacker: The composed attacker for it.
-        lease: Asked for a token as this conversation starts, so a suite longer than the
+        attacker: The composed attacker for it. Unused by a planted attack, which has no
+            turns to compose.
+        lease: Asked for a token as this attempt starts, so a suite longer than the
             consent window renews rather than being refused by its own gate.
-        max_turns: Per-conversation budget.
-        run: The run the tool server records this conversation's calls under, and the runner
+        max_turns: Per-conversation budget. Not applicable to a planted attempt, which fires
+            once.
+        run: The run the tool server records this attempt's calls under, and the runner
             reads them back under.
+        channels: The channels the target declares, keyed by name. Required for a planted
+            attack and unused otherwise.
 
     Returns:
         The outcome, successful or not.
@@ -271,9 +297,28 @@ def run_one(
     subject = dict(attack.subject.identifiers) if attack.subject is not None else None
     try:
         token = lease.token()
-        transcript = run_conversation(
-            token, attacker, run=run, max_turns=max_turns, subject=subject
-        )
+        if attack.is_planted:
+            declared = (channels or {}).get(attack.channel)
+            if declared is None:
+                raise SuiteError(
+                    f"attack {attack.id!r} arrives down channel {attack.channel!r}, which "
+                    f"this agent does not declare. Attacking a channel the deployment does "
+                    f"not have would report a finding about the harness."
+                )
+            assert attack.planted is not None  # guaranteed by Attack.__post_init__
+            transcript = run_planted(
+                token,
+                declared,
+                attack.planted.text,
+                run=run,
+                record_id=attack.planted.record_id,
+                goal=attack.goal,
+                subject=subject,
+            )
+        else:
+            transcript = run_conversation(
+                token, attacker, run=run, max_turns=max_turns, subject=subject
+            )
     except Exception as error:
         return Outcome(
             attack=attack,
@@ -342,14 +387,19 @@ def execute(
     started = time.monotonic()
     order = {attack.id: index for index, attack in enumerate(attacks)}
 
+    # A planted attack composes no turns, so it gets no attacker and costs no model call on
+    # the harness side. Handing one to `build_attackers` is refused there rather than here.
     attackers = [
-        build_attackers(
+        None
+        if attack.is_planted
+        else build_attackers(
             (attack,),
             RecordingModelClient(inner, recorder, label=attack.id),
             max_turns=max_turns,
         )[0]
         for attack in attacks
     ]
+    channels = spec.config.channels_by_name
 
     run.number = number
     store = Store(store_path) if store_path is not None else None
@@ -372,7 +422,9 @@ def execute(
     try:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {
-                pool.submit(run_one, attack, attacker, lease, max_turns, record_run): attack
+                pool.submit(
+                    run_one, attack, attacker, lease, max_turns, record_run, channels
+                ): attack
                 for attack, attacker in zip(attacks, attackers, strict=True)
             }
             for future in as_completed(futures):
@@ -474,8 +526,9 @@ def to_json(run: SuiteRun) -> dict[str, Any]:
         "outcomes": [
             {
                 "attack_id": o.attack.id,
-                "technique": o.attack.technique.name,
-                "technique_id": o.attack.technique.id,
+                "technique": o.attack.move_name,
+                "technique_id": o.attack.move,
+                "channel": o.attack.channel,
                 "stake_id": o.attack.stake.id,
                 "stake_kind": str(o.attack.stake.kind),
                 "consequence": str(o.attack.stake.consequence),
@@ -534,7 +587,7 @@ def summarise(run: SuiteRun) -> str:
     ]
     for outcome in run.outcomes:
         if not outcome.ok:
-            lines.append(f"  FAILED  {outcome.attack.technique.name}: {outcome.error}")
+            lines.append(f"  FAILED  {outcome.attack.move_name}: {outcome.error}")
             continue
         assert outcome.transcript is not None
         broke = len(outcome.violations)
@@ -546,7 +599,7 @@ def summarise(run: SuiteRun) -> str:
         else:
             mark = "UNTESTED"
         lines.append(
-            f"  {mark}  {outcome.attack.technique.name}: "
+            f"  {mark}  {outcome.attack.move_name}: "
             f"{len(outcome.transcript.turns)} turns, {outcome.seconds}s, "
             f"stopped because {outcome.transcript.stopped_because or 'budget spent'}"
         )

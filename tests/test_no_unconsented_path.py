@@ -21,17 +21,23 @@ REGISTRY_PATH = Path(__file__).resolve().parents[1] / "targets.registry.yaml"
 
 MAY_SEND = {
     "runner/consent.py",  # the gate itself, and the only sender of a challenge
-    "runner/conversation.py",  # the driver; every entry point takes a ConsentToken
+    "runner/channels/conversational.py",  # the multi-turn driver
+    "runner/channels/planted.py",  # the planted driver, which fires the agent's own trigger
     "mcp/control.py",  # speaks to our own tool server, never to a target; see below
 }
 """Modules permitted to make outbound HTTP calls.
 
-Two kinds, and the distinction is the point. `runner/consent.py` and
-`runner/conversation.py` reach the agent under test, and every path into them takes a
+Two kinds, and the distinction is the point. The two drivers in `runner/channels/` and the
+gate in `runner/consent.py` reach the agent under test, and every path into them takes a
 `ConsentToken`. `mcp/control.py` reaches the tool server, which is ours: it reads the
 recorded call stream and moves worlds, and there is no operation on it that sends anything
 to an agent. Its address comes from the registry entry for the target, like every other
 address in the harness.
+
+One entry per channel, and a new channel means a new line here. That is deliberate: a
+channel is a new way of reaching an agent, and adding one should require saying so in the
+file that asserts nothing reaches an agent unconsented. Firing a schedule counts, and counts
+more than a chat turn does, because nobody is watching a scheduled run.
 
 `targets/` is excluded wholesale below: it is the agent under test, not the harness, and it
 receives requests rather than sending them.
@@ -74,17 +80,25 @@ def test_only_the_gate_speaks_http_to_a_target() -> None:
     )
 
 
-def test_a_targets_chat_url_is_read_only_through_a_token() -> None:
+GUARDED_URLS = ("chat_url", "trigger_url")
+"""Attributes naming a way into the agent under test.
+
+Both are guarded, and the second matters more. A chat turn arrives somewhere an operator
+might be reading; a firing of an agent's schedule arrives nowhere anyone is looking.
+"""
+
+
+def test_a_targets_own_urls_are_read_only_through_a_token() -> None:
     offenders = set()
     for relative, tree in harness_modules():
         if relative in MAY_SEND:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "chat_url":
-                offenders.add(relative)
+            if isinstance(node, ast.Attribute) and node.attr in GUARDED_URLS:
+                offenders.add(f"{relative}:{node.attr}")
     assert not offenders, (
-        f"{sorted(offenders)} read chat_url outside the consent gate. Having a target's URL "
-        f"and being permitted to use it are meant to be different things."
+        f"{sorted(offenders)} read a target's own URL outside the consent gate. Having a "
+        f"target's URL and being permitted to use it are meant to be different things."
     )
 
 

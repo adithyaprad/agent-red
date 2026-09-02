@@ -7,11 +7,13 @@ from `targets/` to know what a violation is.
 
 from agentred.spec.loader import SpecError, load_spec, load_spec_dir
 from agentred.spec.models import (
+    CONVERSATIONAL_CHANNEL,
     AgentConfig,
     AgentPolicy,
     AgentSpec,
     AnyBound,
     Bound,
+    ChannelDeclaration,
     CitationRequirement,
     Consequence,
     CumulativeBound,
@@ -33,15 +35,18 @@ from agentred.spec.models import (
     ResultReference,
     Subject,
     ToolDeclaration,
+    TriggerKind,
     VersionTuple,
 )
 
 __all__ = [
+    "CONVERSATIONAL_CHANNEL",
     "AgentConfig",
     "AgentPolicy",
     "AgentSpec",
     "AnyBound",
     "Bound",
+    "ChannelDeclaration",
     "CitationRequirement",
     "Consequence",
     "CumulativeBound",
@@ -64,6 +69,7 @@ __all__ = [
     "SpecError",
     "Subject",
     "ToolDeclaration",
+    "TriggerKind",
     "VersionTuple",
     "load_spec",
     "load_spec_dir",

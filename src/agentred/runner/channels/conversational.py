@@ -21,130 +21,41 @@ from __future__ import annotations
 
 import secrets
 import time
-from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from agentred.mcp.control import ArenaControl, HttpxArenaControl
-from agentred.mcp.recorder import RecordedCall
+from agentred.runner.channels.attempt import (
+    PlantedField,
+    TargetError,
+    ToolCallRecord,
+    Transcript,
+    Turn,
+)
 from agentred.runner.consent import ConsentToken
 
 DEFAULT_MAX_TURNS = 6
 TURN_TIMEOUT_SECONDS = 120.0
 
+__all__ = [
+    "DEFAULT_MAX_TURNS",
+    "TURN_TIMEOUT_SECONDS",
+    "Attacker",
+    "HttpxTargetTransport",
+    "PlantedField",
+    "TargetError",
+    "TargetTransport",
+    "ToolCallRecord",
+    "Transcript",
+    "Turn",
+    "new_session_id",
+    "run_conversation",
+]
+"""Re-exported so that the thirty-odd modules reading a transcript keep one import path.
 
-class TargetError(RuntimeError):
-    """The target could not be reached, or answered with something unusable.
-
-    Distinct from a target that answered badly: an agent that says something it should not
-    is the result, and a target that returns HTTP 500 is a broken run. Conflating them
-    would let an outage read as a suite full of well-behaved agents.
-    """
-
-
-@dataclass(frozen=True)
-class ToolCallRecord:
-    """One tool call, as the tool server observed it.
-
-    Attributes:
-        name: The declared tool name.
-        arguments: Arguments as the model sent them, uncoerced. Bounds are checked against
-            what was passed, not against what the agent said it passed.
-        result: What the tool returned.
-    """
-
-    name: str
-    arguments: dict[str, Any]
-    result: dict[str, Any]
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> ToolCallRecord:
-        """Build a record from a stored transcript."""
-        return cls(
-            name=str(payload.get("name", "")),
-            arguments=dict(payload.get("arguments") or {}),
-            result=dict(payload.get("result") or {}),
-        )
-
-    @classmethod
-    def from_recorded(cls, call: RecordedCall) -> ToolCallRecord:
-        """Build a record from what the tool server recorded."""
-        return cls(name=call.name, arguments=dict(call.arguments), result=dict(call.result))
-
-
-@dataclass(frozen=True)
-class Turn:
-    """One exchange: what was said to the agent, and what it did about it.
-
-    Attributes:
-        index: Zero-based position in the conversation.
-        user: The attacker's turn.
-        reply: The agent's text.
-        tool_calls: Tools called while producing that reply, in call order.
-        latency_seconds: Wall clock for the target's answer.
-        agent_usage: What this turn cost the target, as the target reported it. Empty when the
-            target does not report it, which is not a claim that it was free. Kept because the
-            harness spends on both sides of every turn and can otherwise only see its own
-            half of the bill.
-    """
-
-    index: int
-    user: str
-    reply: str
-    tool_calls: tuple[ToolCallRecord, ...] = ()
-    latency_seconds: float = 0.0
-    agent_usage: dict[str, float] = field(default_factory=dict)
-
-
-@dataclass
-class Transcript:
-    """One attack conversation, complete.
-
-    The unit the judge grades, the store keeps and the scorecard cites. It carries the spec
-    versions the target reported rather than the ones the harness believed, so a transcript
-    can never be attributed to a version of the agent that did not produce it.
-
-    Attributes:
-        target: The registered target name.
-        session: The session id the target kept this conversation's world under.
-        goal: What the attacker was trying to make the agent do, in one line.
-        turns: The exchanges, in order.
-        spec_versions: Config, policy, model and tool versions, as reported by the target.
-        subject: Who this conversation is about, as identifier kind to value, for example
-            `{"order_id": "ORD-1"}`. The scope detector has nothing to compare a reached
-            record against without it, and an empty subject makes every scope check report
-            as unevaluated rather than as passed.
-        stopped_because: Why the conversation ended.
-    """
-
-    target: str
-    session: str
-    goal: str
-    turns: list[Turn] = field(default_factory=list)
-    spec_versions: dict[str, str] = field(default_factory=dict)
-    subject: dict[str, str] = field(default_factory=dict)
-    stopped_because: str = ""
-
-    @property
-    def messages(self) -> list[dict[str, str]]:
-        """The conversation in wire shape, for sending the next turn or showing a human."""
-        wire: list[dict[str, str]] = []
-        for turn in self.turns:
-            wire.append({"role": "user", "content": turn.user})
-            wire.append({"role": "assistant", "content": turn.reply})
-        return wire
-
-    @property
-    def tool_calls(self) -> tuple[ToolCallRecord, ...]:
-        """Every tool call in the conversation, flattened, in order.
-
-        The deterministic detectors read this: a bound is broken by an argument, and a
-        precondition is broken by an order, and both are answerable from this list alone.
-        """
-        return tuple(call for turn in self.turns for call in turn.tool_calls)
-
-    def called(self, name: str) -> bool:
-        """Whether a tool was called at any point in the conversation."""
-        return any(call.name == name for call in self.tool_calls)
+`attempt.py` owns these; naming them here as well means moving them did not ripple into
+`judge/`, `scoring/` and `store/`, none of which care which driver produced the transcript
+they are reading.
+"""
 
 
 @runtime_checkable

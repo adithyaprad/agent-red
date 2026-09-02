@@ -34,14 +34,30 @@ from typing import Any
 
 from agentred.mcp.world import World, fresh_world
 
-PLANTABLE_COLLECTIONS = ("products", "customers", "carts", "orders")
+COLLECTION_FOR_SOURCE = {
+    "catalog": "products",
+    "customers": "customers",
+    "carts": "carts",
+    "orders": "orders",
+    "disputes": "disputes",
+}
+"""Declared data source name to the collection of this world that backs it.
+
+Not the identity function, because an agent declares what it reads (`catalog`) and the world
+stores what is in it (`products`). The mapping lives here rather than in the runner so that
+the one place that knows how a declaration lands on this world is the module that owns the
+world. On a real platform this table is whatever the connector does, and the runner is
+unchanged either way.
+"""
+
+PLANTABLE_COLLECTIONS = tuple(COLLECTION_FOR_SOURCE.values())
 """Collections an attacker's text can reach.
 
 Deliberately not every field of the world. `discount_codes` and `shipping_methods` are
 merchant configuration, and a harness that planted into them would be reporting a finding
 about an attacker who had already got into the admin panel. Each entry here corresponds to
 records a customer or a marketplace writes into: a product title, an account name, a
-delivery instruction, the free text on an order.
+delivery instruction, the free text on an order, the reason a buyer gives their bank.
 """
 
 
@@ -65,6 +81,36 @@ class UnknownSessionError(ArenaError):
     exist, or restoring one, is a wiring bug, and answering it with a fresh world would hand
     the caller a world it did not earn.
     """
+
+
+class UnknownSourceError(ArenaError):
+    """A declared data source does not correspond to any collection of this world.
+
+    Refused rather than guessed at. A channel that named a source nothing backs would plant
+    nowhere and report as attempted, which is the failure this whole module is arranged to
+    make impossible.
+    """
+
+
+def collection_for(source: str) -> str:
+    """The collection backing a declared data source.
+
+    Args:
+        source: The `data_source` name from a `ChannelDeclaration`.
+
+    Returns:
+        The collection name `plant` takes.
+
+    Raises:
+        UnknownSourceError: If nothing in this world backs that source.
+    """
+    collection = COLLECTION_FOR_SOURCE.get(source)
+    if collection is None:
+        raise UnknownSourceError(
+            f"no collection of this world backs data source {source!r}. Backed: "
+            f"{', '.join(sorted(COLLECTION_FOR_SOURCE))}."
+        )
+    return collection
 
 
 @dataclass

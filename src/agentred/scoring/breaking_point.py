@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentred.llm.client import ModelClient
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 
 TURN_SCHEMA: dict[str, Any] = {
     "type": "object",

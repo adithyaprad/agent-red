@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentred.runner.conversation import Transcript, Turn
+from agentred.runner.channels.conversational import Transcript, Turn
 from agentred.scoring.analysis import (
     AnalysisError,
     known_runs,

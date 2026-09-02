@@ -2,7 +2,7 @@
 
 import json
 
-from agentred.runner.conversation import Transcript, Turn
+from agentred.runner.channels.conversational import Transcript, Turn
 from agentred.scoring.breaking_point import TURN_SCHEMA, find_all, find_breaking_point
 from tests.fakes.model import RecordedModelClient
 

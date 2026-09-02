@@ -41,7 +41,7 @@ from agentred.judge.detectors.outbound import payload_leak
 from agentred.judge.detectors.preconditions import precondition_skipped
 from agentred.judge.detectors.scope import scope_violation
 from agentred.judge.models import Finding
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 from agentred.spec.models import AgentSpec
 
 DETECTORS = (

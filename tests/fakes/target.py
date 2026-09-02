@@ -163,7 +163,7 @@ class InProcessTransport:
         return asyncio.run(self.agent.chat(request)).model_dump()
 
     def fork(self, token: Any, source: str, session: str, at_turn: int | None = None) -> None:
-        from agentred.runner.conversation import TargetError
+        from agentred.runner.channels.conversational import TargetError
 
         token.require_live()
         self.tokens.append(token)
@@ -179,11 +179,51 @@ class BrokenTransport:
     def send(
         self, token: Any, session: str, run: str, conversation: list[dict[str, str]]
     ) -> dict[str, Any]:
-        from agentred.runner.conversation import TargetError
+        from agentred.runner.channels.conversational import TargetError
 
         raise TargetError("target answered a turn with HTTP 502")
 
     def fork(self, token: Any, source: str, session: str, at_turn: int | None = None) -> None:
-        from agentred.runner.conversation import TargetError
+        from agentred.runner.channels.conversational import TargetError
 
         raise TargetError("target answered a fork with HTTP 502")
+
+
+class InProcessScheduleTransport:
+    """Fires a `TargetAgent`'s scheduled entry point with no socket in between.
+
+    Separate from `InProcessTransport` on purpose. The two are different acts against the
+    agent, and a fake that could do both would let a test claim it fired a schedule when it
+    actually sent a turn, which is the exact substitution ADR-0006 forbids.
+
+    Attributes:
+        agent: The target to fire.
+        tokens: Every consent token it was handed, so a test can assert that the driver
+            never fires a schedule without one.
+        firings: How many times it was fired.
+    """
+
+    def __init__(self, agent: TargetAgent) -> None:
+        self.agent = agent
+        self.tokens: list[object] = []
+        self.firings = 0
+
+    def fire(self, token: Any, session: str, run: str) -> dict[str, Any]:
+        import asyncio
+
+        from agentred.targets.runtime import TriggerRequest
+
+        token.require_live()
+        self.tokens.append(token)
+        self.firings += 1
+        request = TriggerRequest(session=session, run=run)
+        return asyncio.run(self.agent.trigger(request)).model_dump()
+
+
+class BrokenScheduleTransport:
+    """A target whose schedule will not fire."""
+
+    def fire(self, token: Any, session: str, run: str) -> dict[str, Any]:
+        from agentred.runner.channels.attempt import TargetError
+
+        raise TargetError("target answered a firing with HTTP 502")

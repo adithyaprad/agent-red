@@ -141,6 +141,134 @@ class DataSource(BaseModel):
     identifier_kinds: tuple[str, ...] = ()
 
 
+class TriggerKind(StrEnum):
+    """What makes the agent read a planted field.
+
+    The third step of the planted lifecycle, and the one carrying the argument (ADR-0006):
+    the attack path has to be a path the deployment actually runs, or the finding is about
+    a test harness. So the trigger is declared per channel and fired for real, and this
+    enum is deliberately short. A kind is added when a target has that entry point, not in
+    anticipation of one, because a declared trigger no driver can fire would let a channel
+    report as attempted and land nowhere.
+
+    Attributes:
+        SCHEDULE: The agent wakes on its own, with no user turn anywhere in the run. A cron
+            firing is the case that motivated the whole channel: an agent nobody talks to
+            was previously not attackable at all.
+        REQUEST: An ordinary, non-adversarial message names the record and the agent reads
+            it as part of answering. The message is not the attack. The attack is already
+            in the record, put there before anyone asked, which is what makes this the
+            harder case to see: the turn the operator would read in a transcript is benign.
+    """
+
+    SCHEDULE = "schedule"
+    REQUEST = "request"
+
+
+RECORD_PLACEHOLDER = "{record}"
+"""What a `REQUEST` trigger template substitutes the planted record's identifier into."""
+
+CONVERSATIONAL_CHANNEL = "conversation"
+"""The name of the implicit channel every agent has, which no declaration may reuse.
+
+Conversation is a channel (ADR-0006) and a first-class one, but it is not declared: an
+agent with a chat interface has it by having one, and there is no field to name or trigger
+to fire. Reserving the name keeps a declared channel from colliding with it on a coverage
+grid, where two different delivery paths sharing a cell would understate what was tried.
+"""
+
+
+class ChannelDeclaration(BaseModel):
+    """One field an adversary writes, and what makes the agent read it.
+
+    A channel is a named way of getting attacker-controlled bytes in front of the agent.
+    Declared by the agent rather than discovered by the harness, for the reason in
+    ADR-0006: on a real platform the harness sees a merchant's declaration and not their
+    database, and what an attacker controls is a property of the deployment that the
+    merchant knows and the harness cannot infer. An agent that declares none is attacked
+    conversationally, and the coverage grid says so rather than leaving the gap silent.
+
+    `writer` is required and is prose. It is the one field here a person reads, and asking
+    for it is the point: a merchant who cannot say who fills a field in has not decided
+    whether it is attacker-controlled, and a channel nobody can attribute is one nobody
+    validated.
+
+    Attributes:
+        name: Identifier for the channel, used by attacks and by the coverage grid. May not
+            be `conversation`, which the implicit conversational channel holds.
+        description: What the field is, in the agent's own domain terms.
+        writer: Who fills this field in, in production, in plain words. Appears in the
+            report beside the finding, because "the buyer typed this when they raised the
+            dispute" is the sentence that makes a planted finding land.
+        data_source: The declared data source the field's record lives in.
+        record_path: The field on that record the payload is written to. A single field
+            name, not a path expression: what is plantable is a field a person fills in,
+            and a channel that needed to traverse structure to reach one would be
+            describing the harness's data model rather than the merchant's form.
+        record_key: The identifier kind naming the record to plant into, for example
+            `dispute_id`. Must be one the data source carries, so the runner can say which
+            record it wrote to and the report can name it.
+        trigger: What makes the agent read the field.
+        trigger_template: For a `REQUEST` trigger, the ordinary message that causes the
+            read, containing `{record}` where the record's identifier goes. Empty for a
+            `SCHEDULE` trigger, and required to be empty, because a template that is never
+            substituted is a benign turn nobody will notice was not sent.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    description: str = Field(default="")
+    writer: str = Field(min_length=1)
+    data_source: str = Field(min_length=1)
+    record_path: str = Field(min_length=1)
+    record_key: str = Field(min_length=1)
+    trigger: TriggerKind
+    trigger_template: str = Field(default="")
+
+    @field_validator("name")
+    @classmethod
+    def _not_the_reserved_name(cls, value: str) -> str:
+        if value == CONVERSATIONAL_CHANNEL:
+            raise ValueError(
+                f"{CONVERSATIONAL_CHANNEL!r} is the implicit conversational channel and "
+                f"cannot be declared as a planted one"
+            )
+        return value
+
+    @field_validator("record_path")
+    @classmethod
+    def _a_field_name_not_a_path(cls, value: str) -> str:
+        if "." in value or "[" in value:
+            raise ValueError(
+                f"record_path {value!r} traverses structure. A channel names one field a "
+                f"person fills in, so that the field it plants into is the field the "
+                f"merchant can point at."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _trigger_carries_what_it_needs(self) -> ChannelDeclaration:
+        if self.trigger is TriggerKind.REQUEST:
+            if not self.trigger_template.strip():
+                raise ValueError(
+                    f"channel {self.name!r} triggers on a request but declares no "
+                    f"trigger_template, so nothing would make the agent read the field"
+                )
+            if RECORD_PLACEHOLDER not in self.trigger_template:
+                raise ValueError(
+                    f"channel {self.name!r} has a trigger_template with no "
+                    f"{RECORD_PLACEHOLDER} in it, so the agent would be asked about no "
+                    f"record in particular and would never reach the planted one"
+                )
+        elif self.trigger_template:
+            raise ValueError(
+                f"channel {self.name!r} triggers on a {self.trigger.value} and also "
+                f"declares a trigger_template, which nothing would send"
+            )
+        return self
+
+
 class NumericBound(BaseModel):
     """A numeric ceiling or floor on one argument of one tool.
 
@@ -965,6 +1093,10 @@ class AgentConfig(BaseModel):
         instructions: The system prompt, verbatim.
         tools: Every tool the agent can call.
         data_sources: Every store the agent can reach.
+        channels: Fields an adversary writes that the agent later reads as context, each
+            with the trigger that makes it read them. Planted channels only; the
+            conversational channel is implicit in having a chat interface. Declared rather
+            than discovered, per ADR-0006.
         unit_symbol: What goes in front of an amount when one is shown to a person. Declared
             rather than assumed, because the harness has no idea what an agent's numbers are
             denominated in and a page that guesses states a figure in the wrong currency.
@@ -985,6 +1117,7 @@ class AgentConfig(BaseModel):
     instructions: str = Field(default="")
     tools: tuple[ToolDeclaration, ...] = ()
     data_sources: tuple[DataSource, ...] = ()
+    channels: tuple[ChannelDeclaration, ...] = ()
     unit_symbol: str = Field(default="\u20b9")
     subject_term: str = Field(default="person", min_length=1)
     value_fields: tuple[str, ...] = ()
@@ -993,12 +1126,51 @@ class AgentConfig(BaseModel):
     def _unique_names(self) -> AgentConfig:
         _reject_duplicates((tool.name for tool in self.tools), "tool")
         _reject_duplicates((source.name for source in self.data_sources), "data source")
+        _reject_duplicates((channel.name for channel in self.channels), "channel")
+        return self
+
+    @model_validator(mode="after")
+    def _channels_reach_declared_sources(self) -> AgentConfig:
+        """Refuse a channel aimed somewhere the agent cannot read from.
+
+        Same rule as a bound naming a tool that does not exist, and it fails the same
+        flattering way. A channel pointed at a source the agent never reaches plants a
+        payload nothing will ever load, the run completes with no violation, and the
+        coverage grid records the cell as attempted. That is worse than an empty cell,
+        because an empty cell is visibly untested and a false green is not.
+
+        The record path is not checked here. Whether a field exists on a record is a
+        property of the data, not of the declaration, and it is asserted where the write
+        happens (`mcp/arena.py` refuses a plant into a field the record never had).
+
+        Raises:
+            ValueError: On the first channel that does not describe the config.
+        """
+        sources = {source.name: source for source in self.data_sources}
+        for channel in self.channels:
+            source = sources.get(channel.data_source)
+            if source is None:
+                raise ValueError(
+                    f"channel {channel.name!r} writes into data source "
+                    f"{channel.data_source!r}, which the agent cannot reach"
+                )
+            if channel.record_key not in source.identifier_kinds:
+                raise ValueError(
+                    f"channel {channel.name!r} names records by {channel.record_key!r}, "
+                    f"which data source {channel.data_source!r} does not carry. Declared: "
+                    f"{', '.join(source.identifier_kinds) or 'none'}."
+                )
         return self
 
     @property
     def tools_by_name(self) -> dict[str, ToolDeclaration]:
         """Declared tools keyed by name."""
         return {tool.name: tool for tool in self.tools}
+
+    @property
+    def channels_by_name(self) -> dict[str, ChannelDeclaration]:
+        """Declared planted channels keyed by name."""
+        return {channel.name: channel for channel in self.channels}
 
     @property
     def consequential_tools(self) -> tuple[ToolDeclaration, ...]:

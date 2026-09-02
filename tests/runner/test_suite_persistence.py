@@ -18,7 +18,7 @@ import pytest
 
 from agentred.attacks.generator import Attack, build_suite
 from agentred.runner import suite as suite_module
-from agentred.runner.conversation import Transcript
+from agentred.runner.channels.conversational import Transcript
 from agentred.runner.suite import Outcome, SuiteRun, execute, persist
 from agentred.spec import load_spec_dir
 from agentred.store.repo import Store
@@ -67,7 +67,7 @@ def test_every_completed_transcript_is_in_the_store(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns, run: Outcome(
+        lambda attack, attacker, lease, max_turns, run, channels=None: Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )
@@ -94,7 +94,7 @@ def test_an_interrupted_run_keeps_the_conversations_that_finished(
     done: list[str] = []
 
     def stop_after_three(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
     ) -> Outcome:
         if len(done) >= 3:
             raise KeyboardInterrupt
@@ -131,7 +131,7 @@ def test_an_interrupted_run_is_still_marked_finished(
     """An open run row would make the partial results look like a run still in flight."""
 
     def stop_immediately(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
     ) -> Outcome:
         raise KeyboardInterrupt
 
@@ -162,7 +162,7 @@ def test_outcomes_come_back_in_suite_sequence_not_completion_sequence(
     backwards = {attack.id: index for index, attack in enumerate(reversed(ordered))}
 
     def finish_in_reverse(
-        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str
+        attack: Attack, attacker: Any, lease: Any, max_turns: int, run: str, channels: Any = None
     ) -> Outcome:
         import time
 
@@ -189,7 +189,7 @@ def test_the_run_number_is_recorded_before_the_first_transcript_is_written(
     monkeypatch.setattr(
         suite_module,
         "run_one",
-        lambda attack, attacker, lease, max_turns, run: Outcome(
+        lambda attack, attacker, lease, max_turns, run, channels=None: Outcome(
             attack=attack, transcript=transcript_for(attack)
         ),
     )
@@ -227,3 +227,80 @@ def test_persist_does_not_write_a_second_copy_of_an_already_stored_run(tmp_path:
     persist(run, store_path)
     with Store(store_path) as store:
         assert store.load_run("run-already-written") is None
+
+
+class TestChannelDispatch:
+    """One attack, one channel, one driver. Getting this wrong is silent both ways."""
+
+    def _spec(self):
+        from agentred.spec import load_spec_dir
+
+        return load_spec_dir("src/agentred/targets/specs/dispute_handler")
+
+    def _planted_attack(self):
+        from agentred.attacks.planted import load_planted
+
+        return load_planted(self._spec())[0]
+
+    def _lease(self):
+        class Lease:
+            def token(self):
+                return object()
+
+        return Lease()
+
+    def test_a_planted_attack_goes_to_the_planted_driver(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attack = self._planted_attack()
+        seen: dict[str, object] = {}
+
+        def fake_planted(token, channel, payload, **kwargs):
+            seen["channel"] = channel.name
+            seen["payload"] = payload
+            seen["record_id"] = kwargs["record_id"]
+            return transcript_for(attack)
+
+        def never(*args, **kwargs):
+            raise AssertionError("a planted attack was sent down the conversation")
+
+        monkeypatch.setattr(suite_module, "run_planted", fake_planted)
+        monkeypatch.setattr(suite_module, "run_conversation", never)
+
+        outcome = suite_module.run_one(
+            attack, None, self._lease(), 6, "run-x", self._spec().config.channels_by_name
+        )
+
+        assert outcome.error == ""
+        assert seen["channel"] == "dispute_reason_text"
+        assert seen["record_id"] == attack.planted.record_id
+        assert seen["payload"] == attack.planted.text
+
+    def test_a_conversational_attack_goes_to_the_conversation_driver(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attack = attacks(1)[0]
+
+        def never(*args, **kwargs):
+            raise AssertionError("a conversational attack was planted")
+
+        monkeypatch.setattr(suite_module, "run_planted", never)
+        monkeypatch.setattr(
+            suite_module, "run_conversation", lambda *a, **k: transcript_for(attack)
+        )
+
+        outcome = suite_module.run_one(attack, None, self._lease(), 6, "run-x", {})
+        assert outcome.error == ""
+
+    def test_a_channel_the_agent_does_not_declare_is_an_error_not_a_pass(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Otherwise a mis-wired channel reads on the scorecard as an attack that held."""
+        attack = self._planted_attack()
+        monkeypatch.setattr(suite_module, "run_planted", lambda *a, **k: transcript_for(attack))
+
+        outcome = suite_module.run_one(attack, None, self._lease(), 6, "run-x", {})
+
+        assert outcome.transcript is None
+        assert "does not declare" in outcome.error
+        assert not outcome.ok

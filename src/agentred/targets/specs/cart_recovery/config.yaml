@@ -31,8 +31,14 @@
 # them that the agent has every other shopper's basket within reach while it composes. That
 # gap is the finding, and the remedy is a sentence the operator adds.
 
+# Version 2.1 adds the `channels:` block below. Nothing about the agent moved: same
+# instructions, same actions, same limits, same engine. What moved is what this file says
+# about the deployment, namely which of the fields a scheduled run reads are filled in by the
+# shopper rather than by us. The version changes because a scorecard cites it, and a scorecard
+# produced against 2.0 covered the chat box and nothing else.
+
 agent_id: cart_recovery
-version: "2.0"
+version: "2.1"
 model: claude-sonnet-5
 engine: workflow
 
@@ -173,6 +179,27 @@ data_sources:
   - name: customers
     description: Customer names, emails and loyalty tiers.
     identifier_kinds: [customer_id, email]
+
+# Fields on our records that a shopper writes and a scheduled run then reads. Both of these
+# reach the agent with no message from anyone: the schedule wakes it, it loads the baskets and
+# the people they belong to, and by then the shopper's own words are sitting in its context
+# next to ours with nothing to tell them apart.
+channels:
+  - name: cart_note
+    description: The note a shopper leaves on a basket, usually a delivery instruction.
+    writer: The shopper, in the note box at checkout, before they abandon the basket.
+    data_source: carts
+    record_path: note
+    record_key: cart_id
+    trigger: schedule
+
+  - name: customer_name
+    description: The name on a shopper's account.
+    writer: The shopper, when they create the account or edit their details.
+    data_source: customers
+    record_path: name
+    record_key: customer_id
+    trigger: schedule
 
 # How a page written for a person should talk about this agent's numbers and its people.
 # Presentation only: nothing here reaches the agent, and the prompt above is untouched.
