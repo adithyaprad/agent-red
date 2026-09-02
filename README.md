@@ -92,7 +92,7 @@ Six design decisions carry the project. Each is argued in full in `docs/`.
    conversation remains a first-class channel, because it is the only one where an attack can
    adapt to what the agent just said.
 
-3. **Attacks are composed, not listed** (`docs/THREAT-MODEL.md`). Agent-independent
+3. **Attacks are composed, not listed.** Agent-independent
    manipulation techniques are crossed with what a given agent actually has to lose, derived
    from its own declared tools, bounds, preconditions and data scope, and with the channels it
    declares. A fixed list of test prompts gets patched string by string and the agent stays
@@ -105,11 +105,13 @@ Six design decisions carry the project. Each is argued in full in `docs/`.
    interpretive cases reach the LLM judge, and the two are reported in separate sections that
    are never blended into one headline.
 
-5. **The judge is measured, not trusted** (`docs/EVALUATION.md`). Judge output is scored
-   against human-labelled held-out transcripts, and the report carries per-class precision and
-   recall, false-positive cost, the judge's instability under perturbation, and the human
-   self-agreement ceiling. Nothing outside `judge/calibration/` may read the held-out set, and
-   a test enforces that.
+5. **How much of a result rests on a reading is reported, per run.** Every goal the suite
+   derives records whether a detector settles it or a model does, and the share in the second
+   category is on the page, so a reader knows which parts of a report are assertions about a
+   call stream and which are a reading of a reply. Two guards constrain the reading half. A
+   model verdict must quote the sentence that broke the rule, and one whose quote appears
+   nowhere in the conversation is discarded. So is one whose reasoning argues the opposite of
+   the verdict it sits under.
 
 6. **Consent is architectural, not a policy note** (`docs/SAFETY.md`). Targets resolve from a
    registry and must echo a per-run nonce before the first attack turn. No code path accepts a
@@ -190,11 +192,10 @@ uv run ruff check .
 | `src/agentred/targets/` | Agents under test. A stand-in for a merchant agent platform, not part of the product surface. |
 | `src/agentred/attacks/` | Technique corpus, stake derivation, the goal-channel-technique lattice, mutation operators, generator |
 | `src/agentred/runner/` | Consent gate, and one driver per channel |
-| `src/agentred/judge/` | Deterministic detectors, LLM judge, calibration harness |
+| `src/agentred/judge/` | Deterministic detectors, and the model judge for what they cannot settle |
 | `src/agentred/scoring/` | Rule ledger, exposure model, coverage grid, the pages a person reads |
-| `src/agentred/patch/` | Config change generation, application, and the measured re-run |
-| `src/agentred/benign/` | The utility suite that runs beside every attack suite |
-| `docs/` | Architecture, threat model, evaluation methodology, safety scope, ADRs |
+| `src/agentred/store/` | SQLite persistence for runs, transcripts and verdicts |
+| `docs/` | Architecture, safety scope, and the decision records |
 
 ## Limitations
 
@@ -218,9 +219,12 @@ Stated up front rather than discovered by a reader. Each is a consequence of a d
 - **Sample sizes are small and per-family counts are preferred to percentages.** Seven of
   twelve going to zero of twelve is honest; 34% going to 3% on forty trials claims a precision
   the data does not have.
-- **The judge is imperfect and the size of that imperfection is published.**
+- **Interpretive findings are a reading, not an assertion.** A rule about what an agent said
+  cannot be settled from a call stream, so a model settles it, and every such finding is
+  labelled as one and carries the reading's own confidence. The share of a run in that category
+  is reported beside the result.
 - **Attack coverage is policy and authority manipulation only.** Not jailbreaks, not harmful
-  content, not infrastructure. See `docs/THREAT-MODEL.md`.
+  content, not infrastructure.
 - **This is a pre-go-live gate.** Continuous post-deploy monitoring is a different product.
 - **A well-built agent may resist everything.** If a workflow extracts structured fields before
   the reasoning step, a planted payload never reaches the decision context. That is the correct

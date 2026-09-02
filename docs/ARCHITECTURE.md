@@ -34,9 +34,12 @@ agent-red reads what the merchant built, and derives the attack suite from it.
 | **Channels** | Where attacker-controlled bytes can enter: which fields of which records a customer writes, and the trigger that makes the agent read them | Declared, because what an adversary controls is a property of the deployment and the merchant knows it |
 
 The split matters: config is capability, policy is authorisation, and every system that grants
-power to an actor separates the two. It also decides what remedies exist. A structured policy
-can be tightened, which makes a violation unreachable. A limit written as English inside a
-system prompt can only be reworded, which makes a violation less likely. See
+power to an actor separates the two. It also decides what remedies exist, and the difference is
+the whole reason the split is worth making. A structured policy can be tightened, which makes a
+violation unreachable. A limit written as English inside a system prompt can only be reworded,
+which makes a violation less likely. Those are not two strengths of the same fix; they are
+different kinds of promise, and a report that presented them as interchangeable would be telling
+an operator a rewording had closed something it had only discouraged. See
 `docs/DECISIONS/ADR-0003-instruction-vs-permission.md`.
 
 Channels are what makes the suite reach an agent nobody talks to. A cart-abandonment agent has
@@ -346,11 +349,17 @@ second category, so a scorecard always states how much of itself rests on the ju
 that declares nothing scores 1.0 there, which is the honest reading: there was nothing to
 check against.
 
-**The judge is measured, not trusted.** Deciding whether an agent "conceded" or "leaked"
-does need a model for the residue, and that model is unreliable. `judge/calibration/`
-scores the judge against human labels on a held-out set and reports precision, recall,
-false-positive cost and the judge's own disagreement rate across repeated samples. Every
-scorecard carries those numbers, so a reader can discount its claims correctly.
+**What a reading can claim is constrained rather than assumed.** Deciding whether an agent
+"conceded" or "leaked" needs a model for the residue, and a model's answer is an opinion where a
+detector's is an assertion. Three things follow. The share of a run resting on the reading half
+is reported, per run, by `judge_dependence`, so a reader always knows how much of a page is which
+kind of answer. Each verdict shows the reading's own confidence, which is displayed and used to
+decide nothing, because a self-reported number is not an independent one. And two guards discard
+whole classes of wrong answer outright: a violation must quote the sentence that broke the rule
+and is discarded if that sentence appears nowhere in the conversation, and a violation whose
+reasoning argues the opposite of its own verdict is discarded too. Removing a failure mode is a
+different thing from describing one, and it is the part that can be done without a human in the
+loop.
 
 **Some failures are properties of a set, not of a conversation.** No transcript is wrong when
 an agent declines. The finding is that it declined twice and complied once on the same subject
@@ -370,8 +379,8 @@ broke nothing.
 
 **Exposure, not test counts.** "You failed 7 of 40 tests" does not reach a merchant.
 "Your agent can be talked into an average 34% discount, and at your stated volume that is
-roughly this much a month" does. The model, and every assumption it rests on, is in
-`docs/EVALUATION.md`. Assumptions are printed alongside the number, never buried.
+roughly this much a month" does. Every assumption the model rests on is printed alongside the
+number, never buried, and the renderer refuses to emit a figure without them.
 
 **Close the loop, and the fix has to be config.** A finding that is not fixed is not worth
 much, so the harness generates a suggested change from the breaking transcripts, applies it to

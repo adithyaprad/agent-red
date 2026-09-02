@@ -357,8 +357,7 @@ The person on the other end was never shown anything your agent did behind the s
 it said out loud, so everything here is something a real person could have caused.</p>
 <p>Your settings held every time they were tested, and the count beside each one says how many
 times that was. The rules that gave way were found by reading the conversations rather than by
-checking a record, which is a weaker kind of answer, and we have not yet measured how often that
-reading is wrong.</p>
+checking a record, and each of those carries the reading's own confidence beside it.</p>
 <p>This applies to the agent as it is written right now. Change the instructions, the rules, the
 model or what it can do, and it needs checking again.</p>
 </div></details>

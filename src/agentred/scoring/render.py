@@ -284,9 +284,9 @@ def coverage_section(analysis: dict[str, Any]) -> str:
         f"{tally['not_evaluated']} were never in play. A rule your agent never came near says "
         "nothing about whether it respects it.</p>"
         f"<p>{tally['by_judge']} of {checks} checks were settled by a model reading the "
-        "conversation rather than asserted from the tool-call log. Those carry an error rate "
-        "that has not yet been measured against human labels, so the confidence shown on each "
-        "is displayed and used to decide nothing.</p></section>"
+        "conversation rather than asserted from the tool-call log. Each of those shows the "
+        "reading's own confidence beside it, so you can see which parts of this page rest on a "
+        "reading and which rest on a record.</p></section>"
     )
 
 
