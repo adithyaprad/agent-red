@@ -247,6 +247,14 @@ The three that read one call at a time: a tool called beyond a declared bound, a
 tool called without its declared precondition, and an identifier surfaced from outside the
 session's declared data scope.
 
+The third of those has a second shape, because a conversation is with one person and a
+scheduled agent is not. An agent nobody talks to is woken about a set, and acting on all of it
+is the job, so an attempt against one carries the cohort its trigger covered beside the single
+subject it is named for. A record belonging to either is in scope; reaching somebody in neither
+is still a violation. The cohort is read from the world rather than from the agent's own
+selection call, because the agent chooses that call's filter, and a cohort taken from its result
+widens exactly when an attack succeeds in widening it.
+
 The four that do not, each of which exists because a real failure is invisible to the first
 three. A limit on a total across calls, because three amounts inside every ceiling still add up
 past what was ever taken, and an agent talked into instalments defeats a per-call limit
