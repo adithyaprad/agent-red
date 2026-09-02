@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from agentred.mcp.server import ToolServer
 from agentred.spec import load_spec_dir
 from agentred.targets.runtime import TargetAgent, build_agent, build_app
-from tests.fakes.target import ScriptedBackend, ScriptedTurn
+from tests.fakes.target import ScriptedBackend, ScriptedTriggerBackend, ScriptedTurn
 
 SPEC_ROOT = "src/agentred/targets/specs"
 TOOL_SERVER_URL = "http://tools.test:8090"
@@ -194,3 +194,61 @@ def test_both_shipped_specs_build() -> None:
 def test_health_reports_the_mode() -> None:
     body = client_for().get("/health").json()
     assert body == {"status": "ok", "agent_id": "dispute_handler", "mode": "test"}
+
+
+def scheduled_client(*turns: ScriptedTurn) -> tuple[TestClient, ScriptedTriggerBackend]:
+    """A target with a scheduled entry point, and the backend behind it."""
+    server = server_for("cart_recovery")
+    backend = ScriptedTriggerBackend(*turns, server=server)
+    agent = build_agent(
+        load_spec_dir(f"{SPEC_ROOT}/cart_recovery"),
+        backend=backend,
+        tool_server_url=TOOL_SERVER_URL,
+    )
+    backend.attach(agent)
+    return TestClient(build_app(agent)), backend
+
+
+def test_firing_a_schedule_needs_no_conversation() -> None:
+    """The whole point of the channel: nobody talks to this agent, and nothing pretends to."""
+    client, backend = scheduled_client(
+        ScriptedTurn(reply="messaged one shopper", calls=[("list_abandoned_carts", {})])
+    )
+    response = client.post("/trigger", json={"session": "s1", "run": "r1"})
+    assert response.status_code == 200
+    assert response.json()["output"] == "messaged one shopper"
+    assert backend.firings == 1
+    assert backend.seen == []
+
+
+def test_a_firing_carries_the_spec_versions_it_belongs_to() -> None:
+    client, _ = scheduled_client(ScriptedTurn(reply="done"))
+    body = client.post("/trigger", json={"session": "s1", "run": "r1"}).json()
+    assert body["spec_versions"]["config"] == "2.0"
+    assert body["session"] == "s1"
+
+
+def test_a_firing_reports_what_it_cost() -> None:
+    client, _ = scheduled_client(ScriptedTurn(reply="done"))
+    body = client.post("/trigger", json={"session": "s1", "run": "r1"}).json()
+    assert body["usage"]["input_tokens"] == 1.0
+
+
+def test_a_firing_leaves_a_checkpoint_a_fork_can_branch_from() -> None:
+    client, backend = scheduled_client(ScriptedTurn(reply="done"))
+    client.post("/trigger", json={"session": "s1", "run": "r1"})
+    assert len(backend.agent.session("s1").checkpoints) == 1
+
+
+def test_an_agent_with_no_schedule_is_refused_rather_than_answered_with_nothing() -> None:
+    """A silent empty firing would report an attack as withstood that never arrived."""
+    response = client_for(name="cart_recovery").post(
+        "/trigger", json={"session": "s1", "run": "r1"}
+    )
+    assert response.status_code == 404
+    assert "no scheduled entry point" in response.json()["detail"]
+
+
+def test_a_firing_without_a_run_is_refused() -> None:
+    """Unattributed calls are calls nobody is recording."""
+    assert scheduled_client()[0].post("/trigger", json={"session": "s1"}).status_code == 422

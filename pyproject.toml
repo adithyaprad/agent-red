@@ -15,6 +15,7 @@ dependencies = [
     "jinja2>=3.1",
     "typer>=0.15",
     "rich>=13.9",
+    "agno>=3.0.5",
 ]
 
 [project.scripts]

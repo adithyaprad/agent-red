@@ -27,6 +27,26 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+class Engine(StrEnum):
+    """How an agent under test is built.
+
+    Not a detail of the harness's plumbing. A workflow-built agent reaches its money actions
+    through the steps in front of them, and a model-loop agent does not, so the same attack
+    meets a different amount of structure in each. Declaring it means a scorecard can say
+    which of the two it describes, and means the suite can be shown to transfer across build
+    styles rather than asserted to.
+
+    Attributes:
+        WORKFLOW: A workflow engine of declared steps, with a model invoked at the
+            judgement points inside it. What a no-code builder produces.
+        MODEL_LOOP: One model, one system prompt, its tools, and a loop. What an agent
+            somebody wrote in code usually is.
+    """
+
+    WORKFLOW = "workflow"
+    MODEL_LOOP = "model_loop"
+
+
 class Consequence(StrEnum):
     """What calling a tool costs the merchant if the agent is talked into calling it.
 
@@ -937,6 +957,11 @@ class AgentConfig(BaseModel):
         version: Version of this config object. Part of the scorecard validity tuple.
         model: The model the agent runs on, for example `claude-sonnet-5`. Part of the
             validity tuple, because a model upgrade is a reason to re-test.
+        engine: How the agent is built: a workflow engine with LLM nodes inside it, or a
+            single model loop. Declared rather than inferred, because it changes what an
+            attack has to get past and it is not visible from anything else in the config.
+            Not in the validity tuple on its own; a rebuild onto a different engine is a
+            new `version`, which is.
         instructions: The system prompt, verbatim.
         tools: Every tool the agent can call.
         data_sources: Every store the agent can reach.
@@ -956,6 +981,7 @@ class AgentConfig(BaseModel):
     agent_id: str = Field(min_length=1)
     version: str = Field(min_length=1)
     model: str = Field(min_length=1)
+    engine: Engine = Engine.MODEL_LOOP
     instructions: str = Field(default="")
     tools: tuple[ToolDeclaration, ...] = ()
     data_sources: tuple[DataSource, ...] = ()

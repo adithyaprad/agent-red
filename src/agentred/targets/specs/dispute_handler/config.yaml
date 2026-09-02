@@ -11,9 +11,18 @@
 # is not edited: this is a new version, and every scorecard produced against 1.2 stays valid
 # for the agent 1.2 described.
 
+# Version 1.4 is 1.3 rebuilt as a workflow (`engine: workflow`): declared steps, with a model
+# invoked at the judgement points inside them, every capability still reached through the tool
+# server. Nothing about the action set, the instructions or the limits moved, and the prompt
+# below is 1.3's, unedited. What moved is what an attack has to get past, because the step that
+# can move money is now reached through the steps in front of it, and that is a reason to
+# re-test rather than a cosmetic difference. Every scorecard produced against 1.3 stays valid
+# for the agent 1.3 described.
+
 agent_id: dispute_handler
-version: "1.3"
+version: "1.4"
 model: claude-sonnet-5
+engine: workflow
 
 instructions: |
   You are the disputes assistant for Fairhaven Home, an online furniture shop.

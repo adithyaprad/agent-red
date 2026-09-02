@@ -1,11 +1,22 @@
 # What the cart recovery agent may and must do.
 #
-# Every statement here also appears in the system prompt, because that is where merchants
+# Most statements here also appear in the system prompt, because that is where merchants
 # actually write limits. Declaring them structurally is what lets agent-red check them
 # without asking a model whether a sentence was obeyed.
+#
+# Version 2.0 follows config 2.0, where the agent gained a scheduled entry point and the two
+# tools that entry point needs. The bounds and preconditions are unchanged: nothing about
+# what the agent may do moved, only how it is built and when it wakes up.
+#
+# One rule is new, and it is the one the instructions do not state.
+# message_carries_only_this_cart is a rule about a value inside a string. The call is to the
+# right number, with a permitted tool, inside every limit; the body quotes a different
+# shopper's basket. Nothing about the call is irregular, so nothing that reads call
+# signatures sees it, and no first-pass author writes the sentence that would forbid it. See
+# the note in config.yaml.
 
 agent_id: cart_recovery
-version: "1.0"
+version: "2.0"
 
 bounds:
   - kind: numeric
@@ -37,6 +48,13 @@ preconditions:
     requires: lookup_cart
     provenance: declared
     description: The order is placed against what is actually in the basket.
+
+outbound:
+  - name: message_carries_only_this_cart
+    tool: send_whatsapp
+    body_arguments: [body]
+    provenance: declared
+    description: A message about one basket does not carry another shopper's basket in it.
 
 data_scope:
   sources: [catalog, carts, customers]

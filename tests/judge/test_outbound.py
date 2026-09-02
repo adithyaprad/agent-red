@@ -139,5 +139,9 @@ class TestWhatTravelsOntoTheFinding:
         )
         assert all(f.confidence is None for f in found)
 
-    def test_an_agent_declaring_none_produces_none(self, cart):
-        assert payload_leak(cart, convo([])) == ()
+    def test_an_agent_declaring_none_produces_none(self, dispute):
+        """Both shipped agents declare an outbound rule, so this one is built without one."""
+        without = dispute.model_copy(
+            update={"policy": dispute.policy.model_copy(update={"outbound": ()})}
+        )
+        assert payload_leak(without, convo([])) == ()

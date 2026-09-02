@@ -462,7 +462,9 @@ class TestScale:
             name: len(build_suite(spec_for(name), corpus=corpus))
             for name in ("cart_recovery", "dispute_handler")
         }
-        assert sizes == {"cart_recovery": 72, "dispute_handler": 160}
+        # cart_recovery went from 72 to 88 at config 2.0: it gained send_whatsapp and the
+        # outbound rule over its body, which is one more stake to cross with the corpus.
+        assert sizes == {"cart_recovery": 88, "dispute_handler": 160}
 
 
 class TestMutationsAsTheThirdCoordinate:

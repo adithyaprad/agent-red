@@ -53,6 +53,10 @@ TOOL_CONNECTOR_NAME = "shop"
 """What the agent's tool connector is called. Tools reach the model as `mcp__shop__<name>`."""
 
 
+class NoTriggerError(RuntimeError):
+    """The agent was asked to fire a scheduled entry point it does not have."""
+
+
 class ChatMessage(BaseModel):
     """One turn of conversation, in the shape the runner sends it.
 
@@ -126,6 +130,48 @@ class ForkRequest(BaseModel):
     source: str = Field(min_length=1)
     session: str = Field(min_length=1)
     at_turn: int | None = None
+
+
+class TriggerRequest(BaseModel):
+    """A request to fire a scheduled agent's own entry point once.
+
+    There is no conversation field and no user turn, because the agent this addresses has
+    neither. What it reads is whatever the world holds when it wakes up, which is why this
+    is the entry point a planted payload is delivered through rather than a prompt saying a
+    schedule fired (ADR-0006).
+
+    Attributes:
+        session: Identifies this firing. The tool server keys its private world and its call
+            stream by the same id, exactly as it does for a conversation.
+        run: The run the calls made while it runs are recorded under.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session: str = Field(min_length=1)
+    run: str = Field(min_length=1)
+
+
+class TriggerResponse(BaseModel):
+    """What a firing answers with.
+
+    The text is incidental and is carried for the transcript rather than for a check: a
+    scheduled agent has nobody to reply to, so what it did is read from the tool server's
+    record and nothing here (ADR-0005).
+
+    Attributes:
+        output: Whatever the agent produced, one block per record it acted on.
+        spec_versions: The four versions this behaviour belongs to.
+        session: Echo of the session id.
+        usage: What the firing cost the target, as its own engine reported it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    output: str
+    spec_versions: dict[str, str]
+    session: str
+    usage: dict[str, float] = {}
 
 
 class ChallengeResponse(BaseModel):
@@ -379,6 +425,44 @@ class TargetAgent:
             raise ValueError(f"session {session!r} already exists")
         self.sessions[session] = self.sessions[source].branch(session, at_turn)
 
+    async def trigger(self, request: TriggerRequest) -> TriggerResponse:
+        """Fire the agent's scheduled entry point once.
+
+        Args:
+            request: The session id for the firing, and the run to record it under.
+
+        Returns:
+            What the agent produced, and the spec versions the behaviour belongs to.
+
+        Raises:
+            NoTriggerError: If this agent has no scheduled entry point. Refused rather than
+                answered with an empty result, because a run that silently recorded nothing
+                would report an agent as having withstood an attack it never received.
+        """
+        backend_trigger = getattr(self.backend, "trigger", None)
+        if not callable(backend_trigger):
+            raise NoTriggerError(
+                f"{self.spec.config.agent_id} has no scheduled entry point to fire; its "
+                f"backend is {type(self.backend).__name__}"
+            )
+        session = self.session(request.session)
+        session.run = request.run
+        session.usage = {}
+        output = await backend_trigger(session)
+        session.checkpoint()
+        versions = self.spec.version_tuple
+        return TriggerResponse(
+            output=output,
+            usage=dict(session.usage),
+            spec_versions={
+                "config": versions.config_version,
+                "policy": versions.policy_version,
+                "model": versions.model_version,
+                "tools": versions.tool_version,
+            },
+            session=request.session,
+        )
+
     def challenge(self, nonce: str) -> ChallengeResponse:
         """Answer a consent challenge.
 
@@ -521,6 +605,29 @@ def _usage_of(result: Any) -> dict[str, float]:
     return flat
 
 
+def default_backend(spec: AgentSpec) -> AgentBackend:
+    """The backend the agent's declared engine calls for.
+
+    Dispatching on the declaration rather than on a flag is what makes the engine a property
+    of the agent instead of a property of how somebody happened to start it. A spec that says
+    it is a workflow and is served as a model loop would be a different agent answering under
+    the same version string, and every scorecard citing that version would be wrong.
+
+    Args:
+        spec: The validated spec.
+
+    Returns:
+        An unattached backend.
+    """
+    from agentred.spec import Engine
+
+    if spec.config.engine is Engine.WORKFLOW:
+        from agentred.targets.agno_backend import AgnoWorkflowBackend
+
+        return AgnoWorkflowBackend()
+    return ClaudeAgentBackend()
+
+
 def build_agent(
     spec: AgentSpec,
     backend: AgentBackend | None = None,
@@ -530,16 +637,18 @@ def build_agent(
 
     Args:
         spec: The validated spec.
-        backend: What produces replies. Defaults to the real Claude Agent SDK backend.
+        backend: What produces replies. Defaults to whichever backend the spec's declared
+            engine calls for.
         tool_server_url: Where the tools are served. Defaults to the environment.
 
     Returns:
         A ready `TargetAgent`.
     """
-    backend = ClaudeAgentBackend() if backend is None else backend
+    backend = default_backend(spec) if backend is None else backend
     agent = TargetAgent(spec=spec, backend=backend, tool_server_url=tool_server_url)
-    if isinstance(backend, ClaudeAgentBackend):
-        backend.attach(agent)
+    attach = getattr(backend, "attach", None)
+    if callable(attach):
+        attach(agent)
     return agent
 
 
@@ -574,6 +683,13 @@ def build_app(agent: TargetAgent) -> Any:
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {"session": request.session, "forked_from": request.source}
+
+    @app.post("/trigger")
+    async def trigger(request: TriggerRequest) -> TriggerResponse:
+        try:
+            return await agent.trigger(request)
+        except NoTriggerError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.post("/chat")
     async def chat(request: ChatRequest) -> ChatResponse:

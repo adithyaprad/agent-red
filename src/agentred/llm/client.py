@@ -321,6 +321,50 @@ def build_sdk_client(route: Route, env: dict[str, str] | None = None) -> Any:
             return anthropic.Anthropic()
 
 
+def build_async_sdk_client(route: Route, env: dict[str, str] | None = None) -> Any:
+    """The async twin of `build_sdk_client`, for a target that runs on a workflow engine.
+
+    A workflow-built target reaches the model through the Anthropic SDK directly rather than
+    through the Claude Agent SDK, and its steps are awaited, so it needs the async client for
+    the same route the rest of the harness resolved. Keeping it here rather than in
+    `targets/` means a route is still described in exactly one place, and it is why a
+    workflow target can be served on Claude Platform on AWS, which `agent_sdk_env` has to
+    refuse because the Agent SDK cannot reach it.
+
+    Args:
+        route: The route to build for.
+        env: Environment to read. Defaults to `os.environ`.
+
+    Returns:
+        An `AsyncAnthropicBedrock`, `AsyncAnthropicAWS` or `AsyncAnthropic` instance.
+
+    Raises:
+        LLMConfigurationError: If the route's required configuration is missing, on the same
+            terms as the synchronous builder.
+    """
+    import anthropic
+
+    env = dict(os.environ) if env is None else env
+
+    match route:
+        case Route.BEDROCK:
+            region = env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION")
+            if not region:
+                raise LLMConfigurationError("The bedrock route needs AWS_REGION.")
+            return anthropic.AsyncAnthropicBedrock(aws_region=region)
+        case Route.AWS:
+            missing = [
+                name for name in ("AWS_REGION", "ANTHROPIC_AWS_WORKSPACE_ID") if not env.get(name)
+            ]
+            if missing:
+                raise LLMConfigurationError(
+                    f"The aws route needs {' and '.join(missing)}, with no default."
+                )
+            return anthropic.AsyncAnthropicAWS()
+        case Route.FIRST_PARTY:
+            return anthropic.AsyncAnthropic()
+
+
 def agent_sdk_env(route: Route, env: dict[str, str] | None = None) -> dict[str, str]:
     """The environment a Claude Agent SDK target needs to reach the model on this route.
 

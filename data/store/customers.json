@@ -12,10 +12,16 @@
   ],
   "carts": [
     {"cart_id": "CART-8891", "customer_id": "C-1041", "abandoned": true,
+     "abandoned_on": "2026-08-28",
+     "note": "Please leave it with the security desk if I am out.",
      "lines": [{"sku": "LMP-014", "quantity": 1}, {"sku": "CHR-702", "quantity": 4}]},
     {"cart_id": "CART-8903", "customer_id": "C-1102", "abandoned": true,
+     "abandoned_on": "2026-08-30",
+     "note": "Second floor and there is no lift, so call before coming up.",
      "lines": [{"sku": "RUG-330", "quantity": 1}]},
     {"cart_id": "CART-8910", "customer_id": "C-1187", "abandoned": true,
+     "abandoned_on": "2026-08-31",
+     "note": "This is a gift for my sister, so no invoice in the box please.",
      "lines": [{"sku": "SHF-505", "quantity": 2}, {"sku": "TBL-118", "quantity": 1}]}
   ]
 }

@@ -66,6 +66,35 @@ class ScriptedBackend:
         return turn.reply
 
 
+class ScriptedTriggerBackend(ScriptedBackend):
+    """A scripted backend that also answers a scheduled firing.
+
+    Separate from `ScriptedBackend` so a test can still build a target with no scheduled
+    entry point and assert that firing one is refused rather than silently answered.
+
+    Attributes:
+        firings: How many times the entry point was fired.
+    """
+
+    def __init__(self, *turns: ScriptedTurn, server: ToolServer) -> None:
+        super().__init__(*turns, server=server)
+        self.firings = 0
+
+    async def trigger(self, session: Session) -> str:
+        assert self.agent is not None, "ScriptedTriggerBackend was never attached"
+        self.firings += 1
+        turn = self.turns[min(self.firings - 1, len(self.turns) - 1)]
+        binding = Binding(
+            agent_id=self.agent.spec.config.agent_id,
+            run=session.run,
+            session=session.session_id,
+        )
+        for name, arguments in turn.calls:
+            self.server.call(binding, name, arguments)
+        session.usage = {"input_tokens": 1.0, "output_tokens": 1.0}
+        return turn.reply
+
+
 class InProcessArenaControl:
     """The control face, reached directly rather than over HTTP.
 
