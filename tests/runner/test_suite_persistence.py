@@ -336,3 +336,67 @@ class TestChannelDispatch:
         assert outcome.transcript is None
         assert "does not declare" in outcome.error
         assert not outcome.ok
+
+
+class TestTheWorldOnTheValidityTuple:
+    """The fifth element, and the only one a spec directory cannot supply. A scorecard
+    computed against one shop says nothing about an agent facing another, and the quieter
+    version of that is what happened the day the shop was rebuilt: every earlier scorecard
+    went on citing a tuple that no longer described what the agent had faced."""
+
+    def spec(self):
+        from agentred.spec import load_spec_dir
+
+        return load_spec_dir("src/agentred/targets/specs/dispute_handler")
+
+    def test_a_server_that_names_a_world_puts_it_on_the_tuple(self, monkeypatch):
+        from agentred.runner import suite
+
+        class Reporting:
+            def __init__(self, url):
+                pass
+
+            def health(self):
+                return {"versions": {"dispute_handler": {"world_version": "sha256:abc123abc123"}}}
+
+        monkeypatch.setattr(suite, "HttpxArenaControl", Reporting)
+        assert suite.versions_for(self.spec(), "http://x").world_version == "sha256:abc123abc123"
+
+    def test_a_server_that_cannot_be_reached_leaves_it_empty_rather_than_guessing(
+        self, monkeypatch
+    ):
+        """A stored result reads as what it was rather than as a world nobody named."""
+        from agentred.mcp.control import ControlError
+        from agentred.runner import suite
+
+        class Unreachable:
+            def __init__(self, url):
+                pass
+
+            def health(self):
+                raise ControlError("no")
+
+        monkeypatch.setattr(suite, "HttpxArenaControl", Unreachable)
+        assert suite.versions_for(self.spec(), "http://x").world_version == ""
+
+    def test_no_control_face_means_no_read_at_all(self):
+        from agentred.runner import suite
+
+        assert suite.versions_for(self.spec(), "").world_version == ""
+
+    def test_a_run_records_the_world_it_was_against(self, tmp_path):
+        from agentred.spec.models import VersionTuple
+        from agentred.store.repo import Store
+
+        with Store(tmp_path / "s.db") as store:
+            run_id = store.create_run(
+                "dispute_handler",
+                VersionTuple(
+                    config_version="1",
+                    policy_version="1",
+                    model_version="m",
+                    tool_version="sha256:t",
+                    world_version="sha256:w",
+                ),
+            )
+            assert store.load_run(run_id)["world_version"] == "sha256:w"

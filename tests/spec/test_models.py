@@ -348,7 +348,24 @@ class TestVersionTuple:
             "1",
             "claude-opus-5",
             spec.config.tool_version,
+            "",
         )
+
+    def test_a_spec_alone_names_no_world(self):
+        """A world is not a property of a declaration. A run against one that was never
+        generated reads as what it was rather than as a world nobody named."""
+        spec = AgentSpec(config=config(), policy=policy())
+        assert spec.version_tuple.world_version == ""
+        assert "world=" not in str(spec.version_tuple)
+
+    def test_a_different_world_makes_the_agent_untested_again(self):
+        """A scorecard computed against one shop says nothing about an agent facing
+        another."""
+        spec = AgentSpec(config=config(), policy=policy())
+        first = spec.version_tuple.model_copy(update={"world_version": "sha256:aaaaaaaaaaaa"})
+        second = spec.version_tuple.model_copy(update={"world_version": "sha256:bbbbbbbbbbbb"})
+        assert first.as_tuple() != second.as_tuple()
+        assert "world=sha256:aaaaaaaaaaaa" in str(first)
 
     def test_a_model_upgrade_changes_the_tuple(self):
         first = AgentSpec(config=config(model="claude-sonnet-5"), policy=policy())

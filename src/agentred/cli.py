@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -34,6 +34,7 @@ from agentred.attacks.infer_policy import Inference, InferenceError, infer_polic
 from agentred.attacks.stakes import derive_stakes
 from agentred.llm import LLMConfigurationError, resolve_route
 from agentred.llm.client import AnthropicModelClient
+from agentred.mcp.generator import DEFAULT_SEED, generate
 from agentred.runner.consent import (
     ConsentError,
     RegisteredTarget,
@@ -184,6 +185,10 @@ def _stale_versions(target: RegisteredTarget, health: dict[str, object]) -> str:
         on_disk = load_spec_dir(target.spec_dir).version_tuple.model_dump(mode="json")
     except SpecError:
         return ""
+    # The world is left out on purpose. It is the one element of the tuple a spec directory
+    # has no opinion about, because a world is not a property of a declaration: the server
+    # reports what it is serving and the files on disk cannot disagree with it.
+    on_disk.pop("world_version", None)
     return ", ".join(
         f"{field}: serving {reported.get(field, '(absent)')!r}, on disk {value!r}"
         for field, value in sorted(on_disk.items())
@@ -638,6 +643,68 @@ def analyse_command(
     if report is not None:
         report.write_text(build(result), encoding="utf-8")
         typer.echo(f"report    {report}")
+
+
+@app.command()
+def world(
+    target: Annotated[str, typer.Option("--target", help="Registered target to build a shop for.")],
+    seed: Annotated[int, typer.Option("--seed", help="What the shop is derived from.")] = (
+        DEFAULT_SEED
+    ),
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the shop and its manifest here.")
+    ] = None,
+) -> None:
+    """Build a shop for an agent from its declaration, and say what it made reachable.
+
+    Contacts nothing and costs nothing. The number it prints is the share of the agent's own
+    declared rules that a record in this shop makes breakable in one step, and the lines under
+    it are the rules nothing could. Those are the important half: a rule with no reachable
+    fixture and a rule that was tested and held are opposite facts about an agent and identical
+    in a finding count, so a suite run over a shop with gaps in it reports a clean sheet that
+    reads exactly like a careful agent.
+
+    Unflattering by construction the first time it is pointed at a new agent, which is the
+    correct direction for it to be wrong in. Every gap says what the declaration did not say,
+    so the fix is a line the operator can add.
+    """
+    spec = load_spec_dir(load_registry().resolve(target).spec_dir)
+    generated = generate(spec, seed=seed)
+    manifest = generated.manifest
+
+    typer.echo(f"shop      {manifest.digest}, seed {manifest.seed}")
+    typer.echo(
+        "records   "
+        + ", ".join(f"{len(rows)} {name}" for name, rows in generated.world.collections.items())
+    )
+    reachable = manifest.reachable
+    typer.echo(
+        f"reachable {len(reachable)} of {len(reachable) + len(manifest.gaps)} declared rules "
+        f"({manifest.coverage():.0%})"
+    )
+    for rule in reachable:
+        for fixture in manifest.for_rule(rule):
+            typer.echo(f"  {fixture.reach.value:<10} {rule}: {fixture.why}")
+    for gap in manifest.gaps:
+        typer.echo(f"  no fixture {gap.rule}: {gap.why}")
+
+    if out is not None:
+        out.write_text(
+            json.dumps(
+                {
+                    "seed": manifest.seed,
+                    "digest": manifest.digest,
+                    "coverage": manifest.coverage(),
+                    "collections": generated.world.collections,
+                    "fixtures": [asdict(fixture) for fixture in manifest.fixtures],
+                    "gaps": [asdict(gap) for gap in manifest.gaps],
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+        typer.echo(f"written   {out}")
 
 
 @app.command()

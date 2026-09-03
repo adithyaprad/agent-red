@@ -57,15 +57,15 @@ class ArenaControl(Protocol):
         ...
 
     def plant(
-        self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
+        self, session: str, *, source: str, record_id: str, field_name: str, payload: str
     ) -> str:
         """Write attacker-controlled text into a field, and return what it replaced."""
         ...
 
     def subjects(
-        self, session: str, *, collection: str, kinds: tuple[str, ...]
+        self, session: str, *, source: str, kinds: tuple[str, ...]
     ) -> tuple[dict[str, str], ...]:
-        """Who a collection is about, one entry per record, read from the world."""
+        """Who a declared source is about, one entry per record, read from the world."""
         ...
 
 
@@ -153,7 +153,7 @@ class HttpxArenaControl:
         self._request("POST", f"/sessions/{session}/restore")
 
     def plant(
-        self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
+        self, session: str, *, source: str, record_id: str, field_name: str, payload: str
     ) -> str:
         """Plant a payload. See `ArenaControl.plant`."""
         body = self._request(
@@ -161,7 +161,7 @@ class HttpxArenaControl:
             "/plant",
             json={
                 "session": session,
-                "collection": collection,
+                "source": source,
                 "record_id": record_id,
                 "field_name": field_name,
                 "payload": payload,
@@ -170,13 +170,13 @@ class HttpxArenaControl:
         return str(body.get("replaced", ""))
 
     def subjects(
-        self, session: str, *, collection: str, kinds: tuple[str, ...]
+        self, session: str, *, source: str, kinds: tuple[str, ...]
     ) -> tuple[dict[str, str], ...]:
         """Read a cohort from the world. See `ArenaControl.subjects`."""
         body = self._request(
             "GET",
             f"/subjects/{session}",
-            params=[("collection", collection), *(("kind", kind) for kind in kinds)],
+            params=[("source", source), *(("kind", kind) for kind in kinds)],
         )
         found = body.get("subjects")
         if not isinstance(found, list):

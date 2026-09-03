@@ -36,11 +36,18 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentred.mcp._guard import TEST_MODE, assert_test_mode
-from agentred.mcp.arena import Arena, ArenaError, PlantError, UnknownSessionError
+from agentred.mcp.arena import (
+    Arena,
+    ArenaError,
+    PlantError,
+    UnknownSessionError,
+    UnknownSourceError,
+)
 from agentred.mcp.recorder import ToolCallRecorder
 from agentred.mcp.tools import TOOLSETS
 from agentred.mcp.tools.base import ToolSet
-from agentred.spec import AgentSpec
+from agentred.mcp.tools.generic import UndeclaredToolError, toolset_for
+from agentred.spec import AgentSpec, VersionTuple
 
 assert_test_mode()
 
@@ -94,7 +101,8 @@ class PlantRequest(BaseModel):
 
     Attributes:
         session: Whose world to write into.
-        collection: One of the plantable collections.
+        source: The declared data source to write into. Resolved against the world's own
+            map, so a generated shop's own collection names need nothing changed here.
         record_id: The record within it.
         field_name: The field to overwrite. Must already exist.
         payload: The text to write.
@@ -103,7 +111,7 @@ class PlantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session: str = Field(min_length=1)
-    collection: str = Field(min_length=1)
+    source: str = Field(min_length=1)
     record_id: str = Field(min_length=1)
     field_name: str = Field(min_length=1)
     payload: str
@@ -153,12 +161,19 @@ class ToolServer:
             agent_id = spec.config.agent_id
             if agent_id in self.specs:
                 raise ToolServerError(f"{agent_id!r} was given to the tool server twice")
+            # A hand-written surface when one exists, otherwise the surface the agent's own
+            # declaration describes. The two shipped agents keep theirs, because they are the
+            # fixture a generic one is checked against; an agent nobody wrote code for is
+            # served from what its merchant declared and needs nothing registered here.
             toolset = TOOLSETS.get(agent_id)
             if toolset is None:
-                raise ToolServerError(
-                    f"no tool implementations registered for agent {agent_id!r}; "
-                    f"registered: {sorted(TOOLSETS)}"
-                )
+                try:
+                    toolset = toolset_for(spec)
+                except UndeclaredToolError as error:
+                    raise ToolServerError(
+                        f"no tool implementations registered for agent {agent_id!r} and its "
+                        f"declaration does not describe them either: {error}"
+                    ) from error
             declared = {tool.name for tool in spec.config.tools}
             if missing := sorted(declared - toolset.names):
                 raise ToolServerError(
@@ -173,6 +188,25 @@ class ToolServer:
             self.toolsets[agent_id] = toolset
         self.arena = arena if arena is not None else Arena()
         self.recorder = recorder if recorder is not None else ToolCallRecorder()
+
+    @property
+    def world_version(self) -> str:
+        """A content hash of the shop this process is serving.
+
+        The fifth element of the validity tuple (ADR-0007), and the only one the spec files
+        cannot supply, because a world is not a property of a declaration. It comes from here
+        because this is the process that holds the world: a scorecard computed against one
+        shop says nothing about an agent facing another, and the day the shop was rebuilt
+        every earlier scorecard went on citing a tuple that no longer described what the
+        agent had faced.
+        """
+        return self.arena.seed_world().digest
+
+    def versions(self, agent_id: str) -> VersionTuple:
+        """The five versions a result against this server is valid for."""
+        return self.spec(agent_id).version_tuple.model_copy(
+            update={"world_version": self.world_version}
+        )
 
     @property
     def agent_ids(self) -> tuple[str, ...]:
@@ -367,7 +401,7 @@ def build_control_app(server: ToolServer) -> Any:
             "mode": TEST_MODE,
             "agents": list(server.agent_ids),
             "versions": {
-                agent_id: server.spec(agent_id).version_tuple.model_dump(mode="json")
+                agent_id: server.versions(agent_id).model_dump(mode="json")
                 for agent_id in server.agent_ids
             },
         }
@@ -428,32 +462,32 @@ def build_control_app(server: ToolServer) -> Any:
     # resolve. It fails at request time rather than at import, so only a request catches it.
     async def subjects(
         session: str,
-        collection: str,
+        source: str,
         kind: list[str] = Query(default=[]),  # noqa: B008
     ) -> dict[str, Any]:
         try:
-            found = server.arena.subjects(session, collection=collection, kinds=tuple(kind))
+            found = server.arena.subjects(session, source=source, kinds=tuple(kind))
         except UnknownSessionError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        except ArenaError as error:
+        except (ArenaError, UnknownSourceError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"session": session, "collection": collection, "subjects": list(found)}
+        return {"session": session, "source": source, "subjects": list(found)}
 
     @app.post("/plant")
     async def plant(request: PlantRequest) -> dict[str, Any]:
         try:
             previous = server.arena.plant(
                 request.session,
-                collection=request.collection,
+                source=request.source,
                 record_id=request.record_id,
                 field_name=request.field_name,
                 payload=request.payload,
             )
-        except PlantError as error:
+        except (PlantError, UnknownSourceError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return {
             "session": request.session,
-            "collection": request.collection,
+            "source": request.source,
             "record_id": request.record_id,
             "field_name": request.field_name,
             "replaced": previous,

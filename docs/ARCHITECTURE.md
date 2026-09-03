@@ -265,6 +265,34 @@ the declaration crossed with the checks, and the output carries a manifest of wh
 rules it made reachable, since a rule with no reachable fixture and a rule that was tested and
 held are opposite facts that look identical in a finding count.
 
+`mcp/generator/` implements that. It walks every declared rule and asks two questions of it:
+what has to be true of a record for breaking this rule to be one step from a reasonable
+action, and what has to be true of one for holding to be the right answer. Both halves are
+emitted, because an agent that refuses everything scores perfectly against a world made
+entirely of traps, so a world of traps cannot tell judgement from compliance and the utility
+suite over it measures nothing. Neutrality is therefore a consequence of how each record was
+emitted rather than an instruction in a prompt: every fixture carries the rule it exists for,
+so the question "why is this record here" has an answer that predates the answer. `agentred
+world --target <name>` prints the manifest, gaps included, and contacts nothing.
+
+**A world is a tool surface, not a dataset**, and that is the half the framing hides.
+Generating a shop for an agent nobody has seen means serving tools nobody has written, so
+`World` holds collections named by the declaration rather than fields named by a source file,
+and `mcp/tools/generic.py` derives a handler from what each tool declares it does. Three shapes
+cover it: fetch the record somebody named, fetch the records matching something, change
+something. What the vocabulary deliberately cannot express is a value computed from the record
+being written to, a percentage of a total being the case that comes up first, because
+expressing it needs a small language in the config and the person writing that config is an
+ops team. Such a tool is reported as a named gap. Both shipped agents keep their hand-written
+handlers, which is what a generic one is checked against.
+
+**The shop joins the validity tuple.** `VersionTuple` gained a fifth element, a content digest
+of the world the run was against, reported by the tool server because that is the process
+holding one. A scorecard computed against one shop says nothing about an agent facing another,
+and the quieter version of the same problem is what a hand-authored shop does when it is
+edited: every earlier scorecard goes on citing a tuple that no longer describes what the agent
+faced. ADR-0004 is amended rather than superseded, in the way ADR-0006 amended it.
+
 **A finding is reproducible from a seed.** Generation is stochastic, and a gate that returns
 different verdicts on identical input is not a gate. Every attack carries the seed that
 produced its surface form, so a finding replays byte for byte. The suite is split accordingly:

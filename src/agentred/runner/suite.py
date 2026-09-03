@@ -31,11 +31,12 @@ from agentred.judge.models import Finding
 from agentred.judge.models import Outcome as JudgeOutcome
 from agentred.llm.client import AnthropicModelClient
 from agentred.llm.recording import CallRecorder, RecordingModelClient
+from agentred.mcp.control import ControlError, HttpxArenaControl
 from agentred.runner.channels.conversational import Transcript, run_conversation
 from agentred.runner.channels.planted import run_planted
 from agentred.runner.consent import ConsentLease, load_registry
 from agentred.spec import load_spec_dir
-from agentred.spec.models import ChannelDeclaration
+from agentred.spec.models import AgentSpec, ChannelDeclaration, VersionTuple
 from agentred.store.repo import Store
 
 DEFAULT_ATTACKER_MODEL = "claude-sonnet-5"
@@ -375,7 +376,8 @@ def execute(
         The run. Complete if it was allowed to finish, and holding whatever completed if it
         was not.
     """
-    spec = load_spec_dir(load_registry().resolve(target).spec_dir)
+    registered = load_registry().resolve(target)
+    spec = load_spec_dir(registered.spec_dir)
     lease = ConsentLease(target)
     inner = AnthropicModelClient(model=model)
     recorder = CallRecorder(recording, label=target)
@@ -414,7 +416,11 @@ def execute(
     run.number = number
     store = Store(store_path) if store_path is not None else None
     if store is not None:
-        run.run_id = store.create_run(run.target, spec.version_tuple, notes=describe(run))
+        run.run_id = store.create_run(
+            run.target,
+            versions_for(spec, registered.control_url),
+            notes=describe(run),
+        )
     # What the tool server files this run's calls under. The store's id when there is a
     # store, so a transcript and the record behind it carry the same name; a minted one
     # otherwise, because two runs sharing a key would read each other's evidence.
@@ -504,15 +510,48 @@ def persist(run: SuiteRun, store_path: Path) -> None:
         return
     spec = load_spec_dir(load_registry().resolve(run.target).spec_dir)
     with Store(store_path) as store:
+        registered = load_registry().resolve(run.target)
         run.run_id = store.create_run(
             run.target,
-            spec.version_tuple,
+            versions_for(spec, registered.control_url),
             notes=describe(run),
         )
         for outcome in completed:
             assert outcome.transcript is not None
             store.save_transcript(run.run_id, outcome.transcript, attack_id=outcome.attack.id)
         store.finish_run(run.run_id)
+
+
+def versions_for(spec: AgentSpec, control_url: str) -> VersionTuple:
+    """The five versions a run's results will be valid for.
+
+    Four come from the declaration. The fifth is the shop, and it comes from the tool server
+    because that is the process holding one: a world is not a property of a declaration, and a
+    scorecard computed against one shop says nothing about an agent facing another (ADR-0007).
+    It is also what stops the quieter version of that: the day the shop was rebuilt, every
+    earlier scorecard went on citing a tuple that no longer described what the agent had faced.
+
+    Args:
+        spec: The loaded spec, supplying the four declared versions.
+        control_url: Origin of the tool server's control face. Empty skips the read.
+
+    Returns:
+        The tuple. A server that cannot be reached, or that reports no world, leaves the
+        element empty rather than having a value guessed for it, so a stored result reads as
+        what it was rather than as a world nobody named.
+    """
+    if not control_url:
+        return spec.version_tuple
+    try:
+        reported = HttpxArenaControl(control_url).health().get("versions") or {}
+    except ControlError:
+        return spec.version_tuple
+    world = str((reported.get(spec.config.agent_id) or {}).get("world_version", ""))
+    return (
+        spec.version_tuple.model_copy(update={"world_version": world})
+        if world
+        else (spec.version_tuple)
+    )
 
 
 def to_json(run: SuiteRun) -> dict[str, Any]:

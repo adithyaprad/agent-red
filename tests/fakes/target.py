@@ -122,20 +122,20 @@ class InProcessArenaControl:
         self.server.arena.restore(session)
 
     def plant(
-        self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
+        self, session: str, *, source: str, record_id: str, field_name: str, payload: str
     ) -> str:
         return self.server.arena.plant(
             session,
-            collection=collection,
+            source=source,
             record_id=record_id,
             field_name=field_name,
             payload=payload,
         )
 
     def subjects(
-        self, session: str, *, collection: str, kinds: tuple[str, ...]
+        self, session: str, *, source: str, kinds: tuple[str, ...]
     ) -> tuple[dict[str, str], ...]:
-        return self.server.arena.subjects(session, collection=collection, kinds=kinds)
+        return self.server.arena.subjects(session, source=source, kinds=kinds)
 
 
 class InProcessTransport:

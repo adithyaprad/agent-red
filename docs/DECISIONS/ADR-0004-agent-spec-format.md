@@ -157,3 +157,34 @@ A violation that is not expressible as a bound, a precondition or a scope is inv
 the detectors and falls to the judge. That limit is stated in `docs/ARCHITECTURE.md` rather
 than papered over, and it is the main thing to revisit if judged violations turn out to
 dominate the results.
+
+## Amendment, 2026-09-03: the world is the fifth element of the validity tuple
+
+Added by ADR-0007 rather than superseding anything here. `VersionTuple` declared four
+versions on the grounds that a change in any of them makes the agent untested again: the
+config, the policy, the model, and a digest of the declared tool set. The world it acted on
+was not among them, because when this was written there was one world and it was
+hand-authored.
+
+Both halves of that turned out to be a problem. A generated world (ADR-0007) is derived from
+a seed, so two runs of the same suite against the same declaration can be against different
+shops, and a verdict that changed between them would be unattributable. And the
+hand-authored shop was not the constant it looked like: on 2026-09-03 it was rebuilt, because
+eight of nine checks could not fire against the previous one, and every scorecard produced
+before that day went on citing a tuple that no longer described what the agent had faced. The
+tuple was silent about the change that mattered most.
+
+So `VersionTuple` carries `world_version`, a content digest of the shop. It is reported by the
+tool server rather than read from the spec directory, because a world is not a property of a
+declaration and the server is the process holding one. A server that reports none leaves it
+empty, so a result stored before this existed reads as what it was rather than as a world
+nobody named. The staleness check in `doctor` compares the other four against the files on
+disk and skips this one, for the same reason: the files have no opinion about it.
+
+A second addition, same date and same ADR. `ToolDeclaration` gained an optional `behaviour`:
+what the tool does to the world, which declared source it touches, and which fields it
+changes. Without it a tool is a per-merchant integration in Python, and a world generated for
+an agent nobody wrote code for could not be reached. It is part of the tool digest, because a
+tool served from its declaration is a tool whose semantics that declaration decides, and a
+scorecard that kept citing an old digest while those semantics moved would be wrong in the
+direction this whole file exists to prevent.

@@ -59,13 +59,15 @@ def get_dispute(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     dispute_id = str(arguments.get("dispute_id", "")).strip()
     order_id = str(arguments.get("order_id", "")).strip()
     if dispute_id:
-        dispute = world.disputes.get(dispute_id)
+        dispute = world["disputes"].get(dispute_id)
         if dispute is None:
             return {"error": f"no dispute {dispute_id}"}
         return dict(dispute)
     if order_id:
         open_on_order = [
-            dict(dispute) for dispute in world.disputes.values() if dispute["order_id"] == order_id
+            dict(dispute)
+            for dispute in world["disputes"].values()
+            if dispute["order_id"] == order_id
         ]
         if not open_on_order:
             return {"error": f"no dispute on order {order_id}"}
@@ -88,7 +90,7 @@ def get_order(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     come from the agent's behaviour rather than from the tool withholding it.
     """
     order_id = str(arguments.get("order_id", ""))
-    order = world.orders.get(order_id)
+    order = world["orders"].get(order_id)
     if order is None:
         return {"error": f"no order {order_id}"}
     return {
@@ -114,7 +116,7 @@ def get_customer(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     through entirely ordinary use of it.
     """
     customer_id = str(arguments.get("customer_id", ""))
-    customer = world.customers.get(customer_id)
+    customer = world["customers"].get(customer_id)
     if customer is None:
         return {"error": f"no customer {customer_id}"}
     return dict(customer)
@@ -135,7 +137,7 @@ def get_shipment(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     has when it is working a dispute.
     """
     order_id = str(arguments.get("order_id", ""))
-    shipment = world.shipments.get(order_id)
+    shipment = world["shipments"].get(order_id)
     if shipment is None:
         return {"error": f"no shipment for order {order_id}"}
     return dict(shipment)
@@ -160,7 +162,7 @@ def issue_refund(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     currency = str(arguments.get("currency", "")).strip()
     key = str(arguments.get("idempotency_key", "")).strip()
 
-    order = world.orders.get(order_id)
+    order = world["orders"].get(order_id)
     if order is None:
         return {"error": f"no order {order_id}"}
     if amount is None:
@@ -209,7 +211,7 @@ def accept_dispute(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     risk on this agent is the refund and not this.
     """
     dispute_id = str(arguments.get("dispute_id", ""))
-    dispute = world.disputes.get(dispute_id)
+    dispute = world["disputes"].get(dispute_id)
     if dispute is None:
         return {"error": f"no dispute {dispute_id}"}
 
@@ -250,7 +252,7 @@ def submit_evidence(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
         cited = [cited]
     cited = [str(item) for item in cited]
 
-    dispute = world.disputes.get(dispute_id)
+    dispute = world["disputes"].get(dispute_id)
     if dispute is None:
         return {"error": f"no dispute {dispute_id}"}
 
@@ -300,7 +302,7 @@ def apply_discount(world: World, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     order_id = str(arguments.get("order_id", ""))
     percent = as_number(arguments.get("percent"))
-    order = world.orders.get(order_id)
+    order = world["orders"].get(order_id)
     if order is None:
         return {"error": f"no order {order_id}"}
     if percent is None:

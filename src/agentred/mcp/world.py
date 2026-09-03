@@ -5,13 +5,24 @@ Every conversation gets its own copy. That is not tidiness: a refund issued in c
 and every failure rate the scorecard reports afterwards would be measuring a mixture of the
 attack and the damage done by earlier attacks. Isolation is what makes a rate mean anything.
 
-The data is checked in under `data/store/` so a run is reproducible. Nothing here is real,
-and the tools in `tools/` are the only things that mutate it.
+**A world is collections named by the declaration, not fields named by this file.** The
+earlier version had eight attributes called `products`, `customers`, `orders` and so on, and
+every one of them was a per-merchant integration written into the harness. An agent that
+handles insurance claims has no orders, and adding it meant editing this dataclass, the
+arena's mapping, the plant path and the tests underneath all three. So the shape moved into
+the data: a world holds a mapping of collection name to records, the names come from what the
+agent declares it reads, and nothing structural has to change to point the harness at a
+different business. See ADR-0007.
+
+The two shipped agents keep a hand-authored world under `data/store/`, because it is the
+fixture a generated world is checked against: a generated shop and a hand-written one that
+disagree is how the generator is known to be faithful.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +30,31 @@ from typing import Any
 
 STORE_DIR = Path(__file__).resolve().parents[3] / "data" / "store"
 """Where the seed files live, relative to the repository root."""
+
+Record = dict[str, Any]
+"""One row. Whatever the declaration says a record of its kind carries."""
+
+Collection = dict[str, Record]
+"""Records of one kind, keyed by whichever identifier the agent reaches them by."""
+
+
+class UnknownSourceError(KeyError):
+    """A declared data source nothing in this world backs.
+
+    Raised rather than guessed at. A channel aimed at a source no collection backs plants a
+    payload nothing will ever load: the run completes, no violation is found, and the coverage
+    grid records the cell as attempted. A false green is worse than an empty cell.
+    """
+
+
+class UnknownCollectionError(KeyError):
+    """A collection this world does not hold was asked for.
+
+    Raised rather than answered with an empty collection. A missing collection read as empty
+    makes every rule over it report as never evaluated, and never evaluated on a grid is
+    indistinguishable at a glance from a rule that was tested: the run would look like it had
+    covered a data source it never touched.
+    """
 
 
 @dataclass
@@ -28,66 +64,82 @@ class World:
     Mutating a `World` affects nothing outside the conversation that owns it.
 
     Attributes:
-        products: Catalogue rows keyed by SKU.
-        shipping_methods: Shipping options keyed by code.
-        discount_codes: Discount codes keyed by code. A code the agent invents is simply
-            absent, which is what makes a fabricated code observable.
-        customers: Customer records keyed by customer id.
-        carts: Abandoned carts keyed by cart id.
-        orders: Orders keyed by order id.
-        disputes: Chargebacks keyed by dispute id. Each carries the reason the buyer wrote,
-            which is text the merchant never authored and an adversary can choose.
-        shipments: Consignments keyed by the order they belong to, one each. Keyed that
-            way because the order is the reference anyone has when a chargeback arrives, and
-            a record nobody can name from what they were sent is a record nobody reads. Each
-            carries the note the courier left at the door, which is the shop's only account
-            of what happened there and is written by a company the shop does not employ.
+        collections: Records by collection name, each collection keyed by the identifier the
+            agent reaches its records by.
+        sources: Declared data source name to the collection backing it. Not the identity
+            function for a hand-authored shop, because an agent declares what it reads
+            (`catalog`) and the shop stores what is in it (`products`). It lives on the world
+            rather than in the runner so that the one thing that knows how a declaration lands
+            on a world is the world, which is what lets a generated shop name its own
+            collections without anything upstream changing. A generated world's map is the
+            identity, because its collections are named by the declaration.
         settled_keys: Deduplication keys a payment action has already been given, to the
             result it produced. A real payments API refuses to charge twice for one key, and
             a synthetic one that did not would make a correctly written agent look reckless.
-        ledger: Money and obligations the conversation created, in call order. The judge
+            Not a collection: nothing declares it and nothing reads it as data.
+        ledger: Money and obligations the conversation created, in call sequence. The judge
             reads the tool-call log rather than this, but a target that keeps its own
             record makes an argument about what happened settleable.
     """
 
-    products: dict[str, dict[str, Any]] = field(default_factory=dict)
-    shipping_methods: dict[str, dict[str, Any]] = field(default_factory=dict)
-    discount_codes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    customers: dict[str, dict[str, Any]] = field(default_factory=dict)
-    carts: dict[str, dict[str, Any]] = field(default_factory=dict)
-    orders: dict[str, dict[str, Any]] = field(default_factory=dict)
-    disputes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    shipments: dict[str, dict[str, Any]] = field(default_factory=dict)
-    settled_keys: dict[str, dict[str, Any]] = field(default_factory=dict)
-    ledger: list[dict[str, Any]] = field(default_factory=list)
+    collections: dict[str, Collection] = field(default_factory=dict)
+    sources: dict[str, str] = field(default_factory=dict)
+    settled_keys: dict[str, Record] = field(default_factory=dict)
+    ledger: list[Record] = field(default_factory=list)
 
-    def customer_by_email(self, email: str) -> dict[str, Any] | None:
-        """Find a customer by email, case-insensitively. `None` if there is no such customer."""
-        wanted = email.strip().lower()
-        for customer in self.customers.values():
-            if customer["email"].lower() == wanted:
-                return customer
-        return None
+    def __getitem__(self, name: str) -> Collection:
+        """The records of one collection.
 
-    def cart_total(self, cart_id: str) -> float:
-        """Sum a cart at catalogue prices.
-
-        Args:
-            cart_id: The cart to total.
-
-        Returns:
-            The total, rounded to two decimal places. Lines naming a SKU the catalogue does
-            not carry contribute nothing.
+        Raises:
+            UnknownCollectionError: If this world holds no such collection.
         """
-        cart = self.carts.get(cart_id)
-        if cart is None:
-            return 0.0
-        total = 0.0
-        for line in cart["lines"]:
-            product = self.products.get(line["sku"])
-            if product is not None:
-                total += float(product["price"]) * int(line["quantity"])
-        return round(total, 2)
+        try:
+            return self.collections[name]
+        except KeyError:
+            held = ", ".join(sorted(self.collections)) or "nothing"
+            raise UnknownCollectionError(
+                f"this world holds no collection {name!r}. It holds: {held}."
+            ) from None
+
+    def __contains__(self, name: str) -> bool:
+        """Whether this world holds a collection of that name."""
+        return name in self.collections
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Every collection this world holds, in the sequence it was built with."""
+        return tuple(self.collections)
+
+    @property
+    def digest(self) -> str:
+        """A content hash of everything this world holds.
+
+        Stable across dictionary ordering, so a world holding the same records is the same
+        world however it was assembled. It exists because a scorecard computed against one
+        shop says nothing about an agent facing another (ADR-0007), and that is as true of a
+        hand-authored shop as of a generated one: the day `data/store/` was rebuilt, every
+        earlier scorecard went on citing a version tuple that no longer described what the
+        agent had faced. This is the element that stops that.
+
+        Truncated to the same width as the tool digest, because both are read by people
+        comparing two runs rather than by anything guarding against collisions.
+        """
+        canonical = json.dumps(self.collections, sort_keys=True, default=str)
+        return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()[:12]}"
+
+    def collection_for(self, source: str) -> str:
+        """The collection backing a declared data source.
+
+        Raises:
+            UnknownSourceError: If nothing in this world backs that source.
+        """
+        collection = self.sources.get(source)
+        if collection is None:
+            backed = ", ".join(sorted(self.sources)) or "nothing"
+            raise UnknownSourceError(
+                f"nothing in this world backs data source {source!r}. Backed: {backed}."
+            )
+        return collection
 
     def record(self, action: str, **detail: Any) -> None:
         """Append one consequential action to this conversation's ledger."""
@@ -97,24 +149,49 @@ class World:
 def _seed() -> World:
     """Read the seed files once, into the template every conversation is copied from.
 
+    The collection names and the key each is keyed by are written here rather than inferred,
+    because this is the hand-authored shop: it exists to be the thing a generated world is
+    compared against, so what is in it is stated rather than derived.
+
     Raises:
         FileNotFoundError: If a seed file is missing. A target with no world is not
             something to start and hope about.
     """
-    catalog = json.loads((STORE_DIR / "catalog.json").read_text(encoding="utf-8"))
-    people = json.loads((STORE_DIR / "customers.json").read_text(encoding="utf-8"))
-    orders = json.loads((STORE_DIR / "orders.json").read_text(encoding="utf-8"))
-    disputes = json.loads((STORE_DIR / "disputes.json").read_text(encoding="utf-8"))
-    shipments = json.loads((STORE_DIR / "shipments.json").read_text(encoding="utf-8"))
+
+    def read(name: str) -> dict[str, Any]:
+        return json.loads((STORE_DIR / name).read_text(encoding="utf-8"))
+
+    catalog = read("catalog.json")
+    people = read("customers.json")
+    orders = read("orders.json")
+    disputes = read("disputes.json")
+    shipments = read("shipments.json")
+
+    def by(rows: list[Record], key: str) -> Collection:
+        return {str(row[key]): row for row in rows}
+
     return World(
-        products={row["sku"]: row for row in catalog["products"]},
-        shipping_methods={row["code"]: row for row in catalog["shipping_methods"]},
-        discount_codes={row["code"]: row for row in catalog["discount_codes"]},
-        customers={row["customer_id"]: row for row in people["customers"]},
-        carts={row["cart_id"]: row for row in people["carts"]},
-        orders={row["order_id"]: row for row in orders["orders"]},
-        disputes={row["dispute_id"]: row for row in disputes["disputes"]},
-        shipments={row["order_id"]: row for row in shipments["shipments"]},
+        collections={
+            "products": by(catalog["products"], "sku"),
+            "shipping_methods": by(catalog["shipping_methods"], "code"),
+            "discount_codes": by(catalog["discount_codes"], "code"),
+            "customers": by(people["customers"], "customer_id"),
+            "carts": by(people["carts"], "cart_id"),
+            "orders": by(orders["orders"], "order_id"),
+            "disputes": by(disputes["disputes"], "dispute_id"),
+            # Keyed by the order rather than by its own reference, because the order is what
+            # anyone has when a chargeback arrives, and a record nobody can name from what
+            # they were sent is a record nobody reads.
+            "shipments": by(shipments["shipments"], "order_id"),
+        },
+        sources={
+            "catalog": "products",
+            "customers": "customers",
+            "carts": "carts",
+            "orders": "orders",
+            "disputes": "disputes",
+            "shipments": "shipments",
+        },
     )
 
 

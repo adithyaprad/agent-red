@@ -44,7 +44,6 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
-from agentred.mcp.arena import collection_for
 from agentred.mcp.control import ArenaControl, HttpxArenaControl
 from agentred.runner.channels.attempt import (
     PlantedField,
@@ -208,7 +207,7 @@ def run_planted(
     control.restore(session)
     replaced = control.plant(
         session,
-        collection=collection_for(channel.data_source),
+        source=channel.data_source,
         record_id=record_id,
         field_name=channel.record_path,
         payload=payload,
@@ -285,7 +284,7 @@ def _cohort(
     """
     if channel.trigger is not TriggerKind.SCHEDULE or not kinds:
         return ()
-    return control.subjects(session, collection=collection_for(channel.data_source), kinds=kinds)
+    return control.subjects(session, source=channel.data_source, kinds=kinds)
 
 
 def _fire(

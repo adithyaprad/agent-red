@@ -96,3 +96,51 @@ def test_doctor_says_nothing_about_versions_a_server_does_not_report() -> None:
         spec_dir=Path("src/agentred/targets/specs/dispute_handler"),
     )
     assert _stale_versions(target, {"agents": ["dispute_handler"]}) == ""
+
+
+class TestTheWorldCommand:
+    """What a generated shop made reachable, printed for a person. Contacts nothing."""
+
+    def run(self, target: str):
+        from typer.testing import CliRunner
+
+        from agentred.cli import app
+
+        result = CliRunner().invoke(app, ["world", "--target", target])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_it_names_the_shop_and_the_share_of_rules_it_reached(self):
+        output = self.run("dispute_handler")
+        assert "sha256:" in output
+        assert "declared rules" in output
+
+    def test_a_rule_nothing_could_reach_is_named_rather_than_dropped(self):
+        """A rule with no reachable fixture and a rule that was tested and held are opposite
+        facts about an agent and identical in a finding count."""
+        assert "no fixture" in self.run("cart_recovery")
+
+    def test_a_gap_says_what_the_operator_could_add(self):
+        """A remediation has to be config shaped, because the reader is an ops team."""
+        assert "does not say which data source" in self.run("cart_recovery")
+
+    def test_both_halves_of_a_rule_are_shown(self):
+        output = self.run("dispute_handler")
+        assert "breakable" in output
+        assert "holding" in output
+
+    def test_it_writes_a_shop_when_asked(self, tmp_path):
+        import json
+
+        from typer.testing import CliRunner
+
+        from agentred.cli import app
+
+        out = tmp_path / "shop.json"
+        result = CliRunner().invoke(
+            app, ["world", "--target", "dispute_handler", "--out", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        written = json.loads(out.read_text())
+        assert written["collections"]["disputes"]
+        assert written["fixtures"][0]["rule"]

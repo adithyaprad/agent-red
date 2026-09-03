@@ -160,3 +160,32 @@ acts on: the stand-in targets in `targets/` remain hand-written and remain outsi
 surface. And it does not infer a policy from anything. The declaration is still supplied, and
 the thesis is unchanged: agent-red verifies that an agent conforms to its declaration, and it
 does not verify that the declaration is correct.
+
+## Implemented, 2026-09-03
+
+`mcp/generator/` builds the world, `mcp/tools/generic.py` serves it, and `agentred world
+--target <name>` reports what it made reachable. Three things came out of the build that the
+decision did not anticipate and that are worth recording here rather than in the code.
+
+**One heuristic, stated openly.** A limit constrains a tool argument; a world holds record
+fields. Connecting them is the whole of making a limit reachable, and there is nothing in a
+declaration that formally links the two. The generator matches them by name, which is true far
+more often than not, and where it is false the rule is reported as a named gap saying that
+naming the field after the argument is what connects them. That is a line a merchant can add,
+which is the shape rule 10 of this project asks a remediation to have. The alternative was
+inventing a field to make the rule reachable, which is the generator deciding what the
+merchant's records contain.
+
+**A world needs ordinary records as well as fixtures.** Every record emitted for a rule is
+unusual in exactly one way, and a shop composed only of those is a shop where refusing
+everything is the winning strategy. Each collection anything fetches from is topped up to a
+floor of ordinary records, and those are deliberately not claimed as fixtures: a fixture exists
+for a rule and says which, and calling filler a fixture would put records in the manifest with
+no rule behind them.
+
+**Two of the shipped agents' rules are gaps, and both are informative.** `apply_discount`
+returns a percentage of a record's own total, and the declaration vocabulary cannot express a
+value computed from the record being written to. Adding a small expression language would make
+every declared tool arguable and would be written by an ops team. So it is reported as a gap,
+and the number the first run prints against a real agent is 87 percent rather than 100. That is
+the correct direction for it to be wrong in.

@@ -86,6 +86,7 @@ class Store:
             ("conversations", "planted_json"): "TEXT NOT NULL DEFAULT '[]'",
             ("conversations", "cohort_json"): "TEXT NOT NULL DEFAULT '[]'",
             ("turns", "usage_json"): "TEXT NOT NULL DEFAULT '{}'",
+            ("runs", "world_version"): "TEXT NOT NULL DEFAULT ''",
         }
         for (table, column), declaration in added.items():
             present = {
@@ -113,7 +114,7 @@ class Store:
 
         Args:
             target: The registered target name.
-            versions: The four versions this run's results will be valid for.
+            versions: The five versions this run's results will be valid for.
             run_id: Force the id. Generated when absent.
             notes: Free text for the operator.
 
@@ -123,7 +124,8 @@ class Store:
         run_id = new_id("run") if run_id is None else run_id
         self.connection.execute(
             "INSERT INTO runs (run_id, target, started_at, config_version, policy_version, "
-            "model_version, tool_version, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "model_version, tool_version, world_version, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 target,
@@ -132,6 +134,7 @@ class Store:
                 versions.policy_version,
                 versions.model_version,
                 versions.tool_version,
+                versions.world_version,
                 notes,
             ),
         )

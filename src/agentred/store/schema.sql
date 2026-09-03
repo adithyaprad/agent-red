@@ -20,12 +20,15 @@ CREATE TABLE IF NOT EXISTS runs (
     target          TEXT NOT NULL,
     started_at      TEXT NOT NULL,
     finished_at     TEXT,
-    -- The validity tuple. A scorecard is valid for exactly these four, and a change in any
-    -- of them makes the agent untested again, so none of them is nullable.
+    -- The validity tuple. A scorecard is valid for exactly these, and a change in any of
+    -- them makes the agent untested again, so none of them is nullable. The world is the
+    -- fifth (ADR-0007) and defaults to empty rather than being backfilled: a run against a
+    -- world nobody generated should read as what it was.
     config_version  TEXT NOT NULL,
     policy_version  TEXT NOT NULL,
     model_version   TEXT NOT NULL,
     tool_version    TEXT NOT NULL,
+    world_version   TEXT NOT NULL DEFAULT '',
     notes           TEXT NOT NULL DEFAULT ''
 );
 

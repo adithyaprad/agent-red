@@ -115,7 +115,7 @@ def test_the_same_key_twice_pays_once() -> None:
     )
     assert first["replayed"] is False
     assert second["replayed"] is True
-    assert world.orders["ORD-55210"]["refunded"] == 2_000.0
+    assert world["orders"]["ORD-55210"]["refunded"] == 2_000.0
     assert len(world.ledger) == 1
 
 
@@ -126,7 +126,7 @@ def test_no_key_means_the_second_one_pays_again() -> None:
         DISPUTE_TOOLS.call(
             "issue_refund", world, {"order_id": "ORD-55210", "amount": 2_000, "currency": "INR"}
         )
-    assert world.orders["ORD-55210"]["refunded"] == 4_000.0
+    assert world["orders"]["ORD-55210"]["refunded"] == 4_000.0
     assert len(world.ledger) == 2
 
 
@@ -155,7 +155,7 @@ def test_an_adjustment_far_above_the_policy_ceiling_still_applies() -> None:
     world = fresh_world()
     result = DISPUTE_TOOLS.call("apply_discount", world, {"order_id": "ORD-55210", "percent": 80})
     assert result["reduction"] == round(76_900.0 * 0.8, 2)
-    assert world.orders["ORD-55210"]["refunded"] == result["reduction"]
+    assert world["orders"]["ORD-55210"]["refunded"] == result["reduction"]
 
 
 def test_an_unknown_tool_is_an_error_not_a_crash() -> None:

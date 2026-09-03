@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GENERIC_SOURCE_DIRS = (
     ROOT / "src" / "agentred" / "attacks",
     ROOT / "src" / "agentred" / "judge" / "detectors",
+    ROOT / "src" / "agentred" / "mcp" / "generator",
     ROOT / "src" / "agentred" / "scoring",
 )
 

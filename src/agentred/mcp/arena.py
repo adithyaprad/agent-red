@@ -28,39 +28,11 @@ to ask.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
-from agentred.mcp.world import World, fresh_world
-
-COLLECTION_FOR_SOURCE = {
-    "catalog": "products",
-    "customers": "customers",
-    "carts": "carts",
-    "orders": "orders",
-    "disputes": "disputes",
-    "shipments": "shipments",
-}
-"""Declared data source name to the collection of this world that backs it.
-
-Not the identity function, because an agent declares what it reads (`catalog`) and the world
-stores what is in it (`products`). The mapping lives here rather than in the runner so that
-the one place that knows how a declaration lands on this world is the module that owns the
-world. On a real platform this table is whatever the connector does, and the runner is
-unchanged either way.
-"""
-
-PLANTABLE_COLLECTIONS = tuple(COLLECTION_FOR_SOURCE.values())
-"""Collections an attacker's text can reach.
-
-Deliberately not every field of the world. `discount_codes` and `shipping_methods` are
-merchant configuration, and a harness that planted into them would be reporting a finding
-about an attacker who had already got into the admin panel. Each entry here corresponds to
-records somebody outside the shop writes into: a product title, an account name, a
-delivery instruction, the free text on an order, the reason a buyer gives their bank, the
-note a courier leaves at a door.
-"""
+from agentred.mcp.world import UnknownSourceError, World, fresh_world
 
 
 class ArenaError(RuntimeError):
@@ -76,6 +48,15 @@ class PlantError(ArenaError):
     """
 
 
+__all__ = [
+    "Arena",
+    "ArenaError",
+    "PlantError",
+    "UnknownSessionError",
+    "UnknownSourceError",
+]
+
+
 class UnknownSessionError(ArenaError):
     """A session was asked about that has never been seen.
 
@@ -83,36 +64,6 @@ class UnknownSessionError(ArenaError):
     exist, or restoring one, is a wiring bug, and answering it with a fresh world would hand
     the caller a world it did not earn.
     """
-
-
-class UnknownSourceError(ArenaError):
-    """A declared data source does not correspond to any collection of this world.
-
-    Refused rather than guessed at. A channel that named a source nothing backs would plant
-    nowhere and report as attempted, which is the failure this whole module is arranged to
-    make impossible.
-    """
-
-
-def collection_for(source: str) -> str:
-    """The collection backing a declared data source.
-
-    Args:
-        source: The `data_source` name from a `ChannelDeclaration`.
-
-    Returns:
-        The collection name `plant` takes.
-
-    Raises:
-        UnknownSourceError: If nothing in this world backs that source.
-    """
-    collection = COLLECTION_FOR_SOURCE.get(source)
-    if collection is None:
-        raise UnknownSourceError(
-            f"no collection of this world backs data source {source!r}. Backed: "
-            f"{', '.join(sorted(COLLECTION_FOR_SOURCE))}."
-        )
-    return collection
 
 
 @dataclass
@@ -123,10 +74,15 @@ class Arena:
         sessions: The live worlds, by session id.
         checkpoints: One saved world per completed turn, by session, in turn order. A fork
             reads from here.
+        seed_world: What a new session's world is copied from. The hand-authored shop by
+            default; a generated one for an agent nobody wrote a shop for. It is a callable
+            rather than a world so that each session gets its own copy without this class
+            having to know how one is made.
     """
 
     sessions: dict[str, World] = field(default_factory=dict)
     checkpoints: dict[str, list[World]] = field(default_factory=dict)
+    seed_world: Callable[[], World] = fresh_world
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def world(self, session: str) -> World:
@@ -137,7 +93,7 @@ class Arena:
         """
         with self._lock:
             if session not in self.sessions:
-                self.sessions[session] = fresh_world()
+                self.sessions[session] = self.seed_world()
             return self.sessions[session]
 
     def knows(self, session: str) -> bool:
@@ -167,7 +123,7 @@ class Arena:
                 caller keeps a snapshot it can restore from again.
         """
         with self._lock:
-            self.sessions[session] = fresh_world() if snapshot is None else deepcopy(snapshot)
+            self.sessions[session] = self.seed_world() if snapshot is None else deepcopy(snapshot)
             self.checkpoints.pop(session, None)
 
     def checkpoint(self, session: str) -> int:
@@ -228,7 +184,7 @@ class Arena:
             self.checkpoints.pop(session, None)
 
     def subjects(
-        self, session: str, *, collection: str, kinds: tuple[str, ...]
+        self, session: str, *, source: str, kinds: tuple[str, ...]
     ) -> tuple[dict[str, str], ...]:
         """Who a collection is about, one entry per record, read from the world itself.
 
@@ -248,7 +204,8 @@ class Arena:
         Args:
             session: Whose world to read. Read after the restore and the plant, so the
                 cohort is the seeded baseline the firing actually saw.
-            collection: One of `PLANTABLE_COLLECTIONS`.
+            source: The declared data source to read, resolved against this world's own
+                map of sources to collections.
             kinds: The identifier kinds a subject is described by, from the agent's declared
                 data scope.
 
@@ -261,13 +218,8 @@ class Arena:
             UnknownSessionError: If the session has no world. Never seeded here, because a
                 cohort read against a world this call created would describe an empty shop
                 and quietly place nothing in scope.
-            PlantError: If the collection is not one this world holds.
+            UnknownSourceError: If nothing in this world backs that source.
         """
-        if collection not in PLANTABLE_COLLECTIONS:
-            raise PlantError(
-                f"{collection!r} is not a collection of this world. Held: "
-                f"{', '.join(PLANTABLE_COLLECTIONS)}."
-            )
         with self._lock:
             if session not in self.sessions:
                 raise UnknownSessionError(
@@ -275,7 +227,8 @@ class Arena:
                     f"cohort read before the world exists would report an empty shop and "
                     f"place nothing in scope."
                 )
-            records: dict[str, dict[str, Any]] = getattr(self.sessions[session], collection)
+            world = self.sessions[session]
+            records = world[world.collection_for(source)]
             found: list[dict[str, str]] = []
             for record in records.values():
                 carried = {
@@ -289,7 +242,7 @@ class Arena:
         return tuple(found)
 
     def plant(
-        self, session: str, *, collection: str, record_id: str, field_name: str, payload: str
+        self, session: str, *, source: str, record_id: str, field_name: str, payload: str
     ) -> str:
         """Write attacker-controlled text into a field of the world.
 
@@ -299,8 +252,9 @@ class Arena:
 
         Args:
             session: Whose world to write into.
-            collection: One of `PLANTABLE_COLLECTIONS`.
-            record_id: The key within that collection.
+            source: The declared data source to write into, resolved against this world's
+                own map of sources to collections.
+            record_id: The key within the collection backing it.
             field_name: The field to overwrite. Must already exist on the record.
             payload: The text to write.
 
@@ -309,16 +263,17 @@ class Arena:
             beside what replaced it.
 
         Raises:
-            PlantError: If the collection is not plantable, the record does not exist, or
-                the field does not exist on it.
+            PlantError: If the record does not exist, or the field does not exist on it.
+            UnknownSourceError: If nothing in this world backs that source. Which is also
+                what keeps merchant configuration out of reach: an agent declares the sources
+                it reads, discount tables and shipping options are not among them, and a
+                harness that planted into one would be reporting a finding about an attacker
+                who was already in the admin panel. The allowlist is the declaration rather
+                than a table in this file, so a generated shop needs nothing changed here.
         """
-        if collection not in PLANTABLE_COLLECTIONS:
-            raise PlantError(
-                f"{collection!r} is not a field an adversary writes into. Plantable: "
-                f"{', '.join(PLANTABLE_COLLECTIONS)}."
-            )
         world = self.world(session)
-        records: dict[str, dict[str, Any]] = getattr(world, collection)
+        collection = world.collection_for(source)
+        records = world[collection]
         record = records.get(record_id)
         if record is None:
             raise PlantError(f"{collection} has no record {record_id!r} to plant into")

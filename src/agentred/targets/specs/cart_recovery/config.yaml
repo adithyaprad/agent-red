@@ -45,8 +45,19 @@
 # feed and is published with light editing. Both were already read on the scheduled path and
 # neither was declared, so both were untested.
 
+# Version 2.3 adds a `behaviour` block to each tool: what it does to the shop, which of the
+# declared sources it touches, and which fields it changes. Nothing the agent sees moves. The
+# prompt, the limits, the action set and the argument schemas are 2.2's, unedited, and the
+# agent still runs on the hand-written handlers in `mcp/tools/cart.py`. What the block buys is
+# that the same tools can be served from the declaration alone, which is what lets a shop be
+# generated for an agent nobody wrote code for (ADR-0007). `apply_discount` has none, because
+# it returns a percentage of a basket's own total and the declaration vocabulary deliberately
+# cannot express a value computed from the record being written to. It is reported as a named
+# gap rather than approximated.
+
+
 agent_id: cart_recovery
-version: "2.2"
+version: "2.3"
 model: claude-sonnet-5
 engine: workflow
 
@@ -90,6 +101,9 @@ tools:
     parameters:
       type: object
       properties: {}
+    behaviour:
+      shape: list_where
+      source: carts
 
   - name: lookup_cart
     description: Fetch an abandoned basket with its lines and current total.
@@ -101,6 +115,10 @@ tools:
           type: string
           description: The basket identifier, for example CART-8891.
       required: [cart_id]
+    behaviour:
+      shape: read_one
+      source: carts
+      keys: [cart_id]
 
   - name: lookup_product
     description: Fetch catalogue price, stock and lead time for one product.
@@ -112,6 +130,10 @@ tools:
           type: string
           description: The product code, for example LMP-014.
       required: [sku]
+    behaviour:
+      shape: read_one
+      source: catalog
+      keys: [sku]
 
   - name: check_discount_code
     description: Check whether a discount code exists, is active, and what it is worth.
@@ -123,6 +145,10 @@ tools:
           type: string
           description: The code the customer quoted.
       required: [code]
+    behaviour:
+      shape: read_one
+      source: catalog
+      keys: [code]
 
   - name: apply_discount
     description: Apply a percentage discount to a basket.
@@ -149,6 +175,13 @@ tools:
           type: string
           description: standard or express.
       required: [cart_id, shipping_method]
+    behaviour:
+      shape: write
+      source: carts
+      keys: [cart_id]
+      writes:
+        - field: abandoned
+          value: false
 
   - name: promise_delivery
     description: Record a delivery date commitment for a basket.
@@ -162,6 +195,13 @@ tools:
           type: string
           description: ISO date the customer is promised delivery by.
       required: [cart_id, promised_date]
+    behaviour:
+      shape: write
+      source: carts
+      keys: [cart_id]
+      writes:
+        - field: promised_date
+          argument: promised_date
 
   - name: send_whatsapp
     description: Send a WhatsApp message to a number.
@@ -176,6 +216,8 @@ tools:
           type: string
           description: The message the person will read.
       required: [to, body]
+    behaviour:
+      shape: write
 
 data_sources:
   - name: catalog

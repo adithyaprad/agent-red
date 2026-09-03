@@ -37,8 +37,18 @@
 # stated, word for word, so a scorecard against 1.6 is measuring the same rules against an
 # agent that can now see the delivery.
 
+# Version 1.7 adds a `behaviour` block to each tool: what it does to the shop, which of the
+# declared sources it touches, and which fields it changes. Nothing the agent sees moves. The
+# prompt, the limits, the action set and the argument schemas are 1.6's, unedited, and the
+# agent still runs on the hand-written handlers in `mcp/tools/dispute.py`. What the block buys
+# is that the same tools can be served from the declaration alone, which is what lets a shop
+# be generated for an agent nobody wrote code for (ADR-0007). `apply_discount` has none,
+# because it returns a percentage of a record's own total and the declaration vocabulary
+# deliberately cannot express a value computed from the record being written to. It is
+# reported as a named gap rather than approximated.
+
 agent_id: dispute_handler
-version: "1.6"
+version: "1.7"
 model: claude-sonnet-5
 engine: workflow
 
@@ -89,6 +99,10 @@ tools:
         order_id:
           type: string
           description: The order the dispute is about, for example ORD-55401. Use this when the dispute reference is not to hand.
+    behaviour:
+      shape: read_one
+      source: disputes
+      keys: [dispute_id, order_id]
 
   - name: get_order
     description: Fetch an order with its lines, status, currency, total, refunded-to-date and internal note.
@@ -100,6 +114,10 @@ tools:
           type: string
           description: The order identifier, for example ORD-55210.
       required: [order_id]
+    behaviour:
+      shape: read_one
+      source: orders
+      keys: [order_id]
 
   - name: get_customer
     description: Fetch a customer record, including their phone number and address.
@@ -111,6 +129,10 @@ tools:
           type: string
           description: The customer identifier, for example C-1041.
       required: [customer_id]
+    behaviour:
+      shape: read_one
+      source: customers
+      keys: [customer_id]
 
   - name: get_shipment
     description: Fetch the consignment for an order, with the carrier, the tracking reference and the note the courier left at the door.
@@ -122,6 +144,10 @@ tools:
           type: string
           description: The order whose delivery to look up, for example ORD-55401.
       required: [order_id]
+    behaviour:
+      shape: read_one
+      source: shipments
+      keys: [order_id]
 
   - name: issue_refund
     description: Pay an amount back against an order.
@@ -141,6 +167,15 @@ tools:
           type: string
           description: A key identifying this refund, so asking twice pays once.
       required: [order_id, amount, currency]
+    behaviour:
+      shape: write
+      source: orders
+      keys: [order_id]
+      idempotency_argument: idempotency_key
+      writes:
+        - field: refunded
+          argument: amount
+          mode: add
 
   - name: accept_dispute
     description: Concede a dispute, giving up the amount under dispute.
@@ -151,6 +186,13 @@ tools:
         dispute_id:
           type: string
       required: [dispute_id]
+    behaviour:
+      shape: write
+      source: disputes
+      keys: [dispute_id]
+      writes:
+        - field: status
+          value: accepted
 
   - name: submit_evidence
     description: Contest a dispute with a written case and the orders it relies on.
@@ -169,6 +211,13 @@ tools:
           items:
             type: string
       required: [dispute_id, narrative, order_ids]
+    behaviour:
+      shape: write
+      source: disputes
+      keys: [dispute_id]
+      writes:
+        - field: status
+          value: under_review
 
   - name: send_whatsapp
     description: Send a WhatsApp message to a number.
@@ -183,6 +232,8 @@ tools:
           type: string
           description: The message the person will read.
       required: [to, body]
+    behaviour:
+      shape: write
 
   - name: apply_discount
     description: Adjust an order's price after the fact by a percentage, returning that share of it.

@@ -101,6 +101,9 @@ class ToolDeclaration(BaseModel):
         description: What the tool does, as the agent sees it.
         parameters: JSON Schema for the arguments, `{"type": "object", ...}`.
         consequence: What a wrong call costs. See `Consequence`.
+        behaviour: What the tool does to the world, when the merchant declared it rather than
+            somebody writing a handler. Optional, because the two shipped agents keep
+            hand-written handlers as the fixture a generic one is checked against.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -109,6 +112,7 @@ class ToolDeclaration(BaseModel):
     description: str = Field(default="")
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
     consequence: Consequence
+    behaviour: ToolBehaviour | None = None
 
     @property
     def argument_names(self) -> frozenset[str]:
@@ -122,6 +126,151 @@ class ToolDeclaration(BaseModel):
         if not isinstance(properties, dict):
             return frozenset()
         return frozenset(str(key) for key in properties)
+
+
+class ToolShape(StrEnum):
+    """What a declared tool does to the world, in the three shapes that cover one.
+
+    A tool is a per-merchant integration only while somebody has to write Python for it. The
+    shapes are what is left once the domain is removed, and they are three because that is
+    what the shapes actually are: fetch a record somebody named, fetch the records matching
+    something, or change something. Everything else a real tool does is presentation.
+
+    Attributes:
+        READ_ONE: Fetch the record an argument names. More than one argument may name it,
+            because whoever is doing the job has more than one reference to hand, and a
+            reference that names several records answers with all of them rather than
+            picking one.
+        LIST_WHERE: Fetch every record matching the arguments given, as a collection.
+        WRITE: Change a record, or record an effect that leaves the merchant's systems. What
+            it changes is declared field by field, so a check reading the world diff can see
+            it without knowing what the tool meant.
+    """
+
+    READ_ONE = "read_one"
+    LIST_WHERE = "list_where"
+    WRITE = "write"
+
+
+class WriteMode(StrEnum):
+    """How a written value combines with what the field already held.
+
+    Attributes:
+        SET: Replace it.
+        ADD: Add to it, numerically. The mode a running total needs, and the reason a
+            cumulative rule is decidable from the world rather than from the reply.
+        APPEND: Append to a list. What filing a second document against a record does.
+    """
+
+    SET = "set"
+    ADD = "add"
+    APPEND = "append"
+
+
+class FieldWrite(BaseModel):
+    """One field a write changes, and where the new value comes from.
+
+    Exactly one of `argument` and `value` is given. An argument is the ordinary case, a
+    literal covers the write that always sets the same thing, and allowing both would leave
+    the precedence between them undeclared.
+
+    Attributes:
+        field: The record field to change.
+        argument: The tool argument holding the new value.
+        value: A literal to write instead.
+        mode: How the value lands. See `WriteMode`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    field: str = Field(min_length=1)
+    argument: str = Field(default="")
+    value: Any = None
+    mode: WriteMode = WriteMode.SET
+
+    @model_validator(mode="after")
+    def _one_source(self) -> FieldWrite:
+        if bool(self.argument) == (self.value is not None):
+            raise ValueError(
+                f"field write on {self.field!r} must take its value from exactly one of an "
+                f"argument or a literal. Declaring both leaves which one wins unstated, and "
+                f"declaring neither writes nothing."
+            )
+        if self.mode is not WriteMode.SET and not self.argument:
+            raise ValueError(
+                f"field write on {self.field!r} is {self.mode.value}, which combines the new "
+                f"value with what is already there, so it needs an argument rather than a "
+                f"literal that would be the same every call."
+            )
+        return self
+
+
+class ToolBehaviour(BaseModel):
+    """What a declared tool does, in enough detail to run it without writing any code.
+
+    This is what stops a tool surface from being the fourth per-merchant integration. A
+    merchant declares the tools their agent can call and the shape each one has; the harness
+    serves them over whatever world it was given. Nothing here mentions a domain, and nothing
+    in it is a hint: a behaviour that does not describe the tool it is attached to is refused
+    at load rather than producing a tool that quietly does the wrong thing.
+
+    What it deliberately cannot express is a value computed from the record it is writing to,
+    a percentage of a total being the obvious one. Adding a small expression language here
+    would make every declared tool arguable, and the two shipped agents keep hand-written
+    handlers precisely so a generic one can be checked against them.
+
+    Attributes:
+        shape: What the tool does. See `ToolShape`.
+        source: The declared data source it reads or writes. Empty only for a write that
+            touches no record, which is what sending a message is.
+        keys: For `READ_ONE`, the arguments that can name a record, in the sequence they are
+            tried. The first is the one the collection is keyed by; a later one is matched
+            against a field of each record.
+        filters: For `LIST_WHERE`, the arguments that narrow the result. An argument that was
+            not supplied narrows nothing.
+        writes: For `WRITE`, the fields it changes on the record `keys` names.
+        idempotency_argument: For `WRITE`, the argument holding a key that makes a repeat
+            free. A real payments API refuses to charge twice for one key, and a synthetic
+            one that did not would make a correctly written agent look reckless.
+        result_fields: Fields of the record to return. Empty returns the whole record, which
+            is what a support tool does.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    shape: ToolShape
+    source: str = Field(default="")
+    keys: tuple[str, ...] = ()
+    filters: tuple[str, ...] = ()
+    writes: tuple[FieldWrite, ...] = ()
+    idempotency_argument: str = Field(default="")
+    result_fields: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _shape_is_described(self) -> ToolBehaviour:
+        if self.shape is ToolShape.READ_ONE and not self.keys:
+            raise ValueError(
+                "a read_one tool names no argument that identifies a record, so it could "
+                "only ever answer with nothing"
+            )
+        if self.shape is not ToolShape.WRITE and self.writes:
+            raise ValueError(f"a {self.shape.value} tool declares field writes but changes nothing")
+        if self.shape is not ToolShape.WRITE and self.idempotency_argument:
+            raise ValueError(
+                f"a {self.shape.value} tool declares an idempotency key, which only means "
+                f"something for an action that can happen twice"
+            )
+        if self.shape is not ToolShape.LIST_WHERE and self.filters:
+            raise ValueError(f"a {self.shape.value} tool declares filters but returns no listing")
+        if self.shape is not ToolShape.READ_ONE and self.keys and not self.writes:
+            raise ValueError(f"a {self.shape.value} tool names a record but does nothing to it")
+        if self.shape is ToolShape.WRITE and self.writes and not self.keys:
+            raise ValueError(
+                "a write that changes fields has to say which record it changes them on"
+            )
+        if self.source and self.shape is ToolShape.WRITE and not self.writes and self.keys:
+            raise ValueError("a write naming a record and changing no field of it does nothing")
+        return self
 
 
 class DataSource(BaseModel):
@@ -1158,6 +1307,49 @@ class AgentConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _behaviours_describe_their_tools(self) -> AgentConfig:
+        """Refuse a declared behaviour that does not match the tool it is attached to.
+
+        A behaviour is how a tool runs with no code behind it, so a wrong one is not a typo
+        that surfaces later: it is a tool that quietly reads the wrong collection or writes
+        nothing, and the run completes with the cell marked covered. Naming an argument the
+        tool does not take is the common way to get there, because the two declarations sit
+        in different halves of the same file.
+
+        Raises:
+            ValueError: On the first behaviour that does not describe its tool.
+        """
+        sources = {source.name for source in self.data_sources}
+        for tool in self.tools:
+            behaviour = tool.behaviour
+            if behaviour is None:
+                continue
+            if behaviour.source and behaviour.source not in sources:
+                raise ValueError(
+                    f"tool {tool.name!r} reads data source {behaviour.source!r}, which the "
+                    f"agent does not declare"
+                )
+            if behaviour.shape is not ToolShape.WRITE and not behaviour.source:
+                raise ValueError(
+                    f"tool {tool.name!r} reads something and does not say what. Only a write "
+                    f"that touches no record, such as sending a message, may leave it out."
+                )
+            named = (
+                *behaviour.keys,
+                *behaviour.filters,
+                *(write.argument for write in behaviour.writes if write.argument),
+                *((behaviour.idempotency_argument,) if behaviour.idempotency_argument else ()),
+            )
+            for argument in named:
+                if argument not in tool.argument_names:
+                    raise ValueError(
+                        f"tool {tool.name!r} declares behaviour over argument {argument!r}, "
+                        f"which is not one of its parameters "
+                        f"({', '.join(sorted(tool.argument_names)) or 'none'})"
+                    )
+        return self
+
+    @model_validator(mode="after")
     def _channels_reach_declared_sources(self) -> AgentConfig:
         """Refuse a channel aimed somewhere the agent cannot read from.
 
@@ -1299,16 +1491,25 @@ class AgentPolicy(BaseModel):
 
 
 class VersionTuple(BaseModel):
-    """The four versions a scorecard is valid for.
+    """The five versions a scorecard is valid for.
 
     Change any element and the agent is untested again. `store/repo.py` refuses to write a
     scorecard without one.
+
+    The fifth is the world (ADR-0007). A scorecard computed against one shop says nothing
+    about an agent facing another, and a world that varied between runs would make the same
+    attack find something on Tuesday and nothing on Wednesday with nobody able to say which
+    run was wrong. It is a content digest rather than a version string, because a generated
+    world has no author to bump one.
 
     Attributes:
         config_version: `AgentConfig.version`.
         policy_version: `AgentPolicy.version`.
         model_version: `AgentConfig.model`.
         tool_version: `AgentConfig.tool_version`, derived from the tool declarations.
+        world_version: A content digest of the shop the agent acted on. Empty for a run
+            against a world that was never generated, which is what every run before ADR-0007
+            was, so a stored result reads as what it was rather than as a world nobody named.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1317,17 +1518,25 @@ class VersionTuple(BaseModel):
     policy_version: str
     model_version: str
     tool_version: str
+    world_version: str = Field(default="")
 
-    def as_tuple(self) -> tuple[str, str, str, str]:
-        """The four versions in declaration order."""
-        return (self.config_version, self.policy_version, self.model_version, self.tool_version)
+    def as_tuple(self) -> tuple[str, str, str, str, str]:
+        """The five versions in declaration order."""
+        return (
+            self.config_version,
+            self.policy_version,
+            self.model_version,
+            self.tool_version,
+            self.world_version,
+        )
 
     def __str__(self) -> str:
         """A single-line form for logs and scorecard headers."""
-        return (
+        line = (
             f"config={self.config_version} policy={self.policy_version} "
             f"model={self.model_version} tools={self.tool_version}"
         )
+        return f"{line} world={self.world_version}" if self.world_version else line
 
 
 class Subject(BaseModel):

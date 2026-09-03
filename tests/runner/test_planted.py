@@ -236,7 +236,7 @@ class TestWhatItRefuses:
             trigger=TriggerKind.REQUEST,
             trigger_template="look at {record}",
         )
-        with pytest.raises(UnknownSourceError, match="no collection of this world"):
+        with pytest.raises(UnknownSourceError, match="nothing in this world backs"):
             run_planted(
                 consent_for(),
                 invented,
