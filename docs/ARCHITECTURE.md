@@ -256,6 +256,15 @@ the declared ceilings, an order with money already returned against it, and one 
 twice, and `tests/mcp/test_world_reachability.py` fails the build if those properties are
 trimmed away. Which records exist and why is `docs/WORLD.md`.
 
+That shop is hand-authored, which is a per-agent integration and the last one in the chain.
+`docs/DECISIONS/ADR-0007-generated-world.md` decides how it is derived instead, and the decision
+turns on the input: a world derived from an agent's declaration alone holds every collection the
+declaration names and none of the properties above, because a declaration says what the rules
+are and not what a shop has to look like for breaking one to be a small step. So the input is
+the declaration crossed with the checks, and the output carries a manifest of which declared
+rules it made reachable, since a rule with no reachable fixture and a rule that was tested and
+held are opposite facts that look identical in a finding count.
+
 **A finding is reproducible from a seed.** Generation is stochastic, and a gate that returns
 different verdicts on identical input is not a gate. Every attack carries the seed that
 produced its surface form, so a finding replays byte for byte. The suite is split accordingly:
