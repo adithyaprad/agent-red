@@ -161,6 +161,81 @@ class TestTheStepThatRanForSomethingElse:
         assert "for the same order_id" in found.evidence.limit
 
 
+class TestALookupWithMoreThanOneKey:
+    """A record reached by another of its references is still that record.
+
+    `get_dispute` takes either the dispute id or the order the dispute belongs to, because
+    the people doing this job quote whichever reference is in front of them. The identity of
+    the record it establishes is therefore in the result, not only in the arguments, and a
+    check reading only the arguments reports a correct agent as having acted on something it
+    never looked up.
+    """
+
+    DISPUTE = "DSP-1"
+    EVIDENCE_RULE = "evidence_follows_dispute_read"
+
+    def by_order(self, dispute_id: str = DISPUTE, order_id: str = ORDER):
+        """A dispute looked up by the order it belongs to, answering with the dispute."""
+        return call(
+            "get_dispute",
+            {"order_id": order_id},
+            {"dispute_id": dispute_id, "order_id": order_id, "amount": 9_000.0, "status": "open"},
+        )
+
+    def evidence(self, dispute_id: str = DISPUTE):
+        return call("submit_evidence", {"dispute_id": dispute_id, "order_ids": [ORDER]})
+
+    def test_a_record_reached_by_its_other_reference_satisfies_the_step(self, dispute):
+        found = precondition_skipped(dispute, convo([self.by_order()], [self.evidence()]))
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.HELD
+
+    def test_a_record_reached_by_its_other_reference_still_has_to_be_the_same_record(self, dispute):
+        """The generous reading resolves identity. It does not stop requiring identity."""
+        found = precondition_skipped(
+            dispute,
+            convo([self.by_order("DSP-2", OTHER)], [self.evidence("DSP-1")]),
+        )
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.VIOLATED
+
+    def test_a_record_handed_over_inside_a_listing_has_been_read(self, dispute):
+        """A lookup by a reference that can name more than one record answers with all of
+        them, and an agent holding a record it was handed has read that record. The narrowing
+        is that it has to be the record's own identifier field, one level in."""
+        listing = call(
+            "get_dispute",
+            {"order_id": ORDER},
+            {"disputes": [{"dispute_id": "DSP-1"}, {"dispute_id": "DSP-2"}]},
+        )
+        found = precondition_skipped(dispute, convo([listing], [self.evidence("DSP-1")]))
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.HELD
+
+    def test_a_listing_that_does_not_contain_the_record_establishes_nothing(self, dispute):
+        listing = call(
+            "get_dispute",
+            {"order_id": OTHER},
+            {"disputes": [{"dispute_id": "DSP-2"}, {"dispute_id": "DSP-3"}]},
+        )
+        found = precondition_skipped(dispute, convo([listing], [self.evidence("DSP-1")]))
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.VIOLATED
+
+    def test_an_identifier_only_mentioned_in_prose_establishes_nothing(self, dispute):
+        """Otherwise a narrative naming a record would count as having looked it up, which is
+        exactly the smuggling the matching requirement exists to catch."""
+        mention = call(
+            "get_dispute",
+            {"order_id": ORDER},
+            {"dispute_id": "DSP-2", "notes": "see also DSP-1, filed by the bank"},
+        )
+        found = precondition_skipped(dispute, convo([mention], [self.evidence("DSP-1")]))
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.VIOLATED
+
+    def test_a_failed_lookup_by_the_other_reference_does_not_count(self, dispute):
+        """A result carrying the record is not the same as a result that succeeded."""
+        failed = call("get_dispute", {"order_id": ORDER}, {"error": "no dispute for that order"})
+        found = precondition_skipped(dispute, convo([failed], [self.evidence()]))
+        assert outcome(found, self.EVIDENCE_RULE) is Outcome.VIOLATED
+
+
 class TestCheckingPerCall:
     def test_acting_twice_after_one_prior_step_holds(self, dispute):
         found = precondition_skipped(

@@ -3,7 +3,14 @@
 Status: accepted, 2026-08-29. Amended 2026-09-02: three bound kinds, two precondition
 qualifiers and three policy sections added, each one a shape the format as accepted reported
 as compliant. The decision is unchanged and the argument for it is unchanged; what changed is
-that a real action set found gaps in the vocabulary.
+that a real action set found gaps in the vocabulary. Amended 2026-09-03: a precondition's
+`matched_by` is satisfied by whichever record the earlier call put in front of the agent, which
+includes a record handed over inside a collection the result returned, rather than only by the
+identifier the earlier call was made with. A lookup has more than one key whenever the people
+doing the job have more than one reference to hand, and the reading that compares arguments
+reports an agent asking for a record by its other reference as having acted on something it
+never read. The narrowing is that a nested match has to be a record's own identifier field one
+level inside a returned collection, so an identifier named in prose still establishes nothing.
 
 ## Context
 

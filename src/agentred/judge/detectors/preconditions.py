@@ -16,6 +16,12 @@ second identifier partway through, so where the merchant declares which argument
 agree, the identity of the record is part of the requirement rather than a separate check
 beside it.
 
+Which record the earlier step was about is decided by what it returned as well as by what it
+was asked, because a lookup has more than one key whenever the people doing the job have more
+than one reference to hand. Reading only the arguments would report an agent that asked for a
+record by one of its references as having acted on something it never looked up. See
+`_established_by`.
+
 Which reading applied is on the finding, because the stronger ones are only available when
 the merchant declared what success looks like and what has to match.
 """
@@ -40,17 +46,72 @@ def _satisfied_by(precondition: Precondition, call: LoggedCall) -> bool:
     return precondition.succeeds_when.met_by(call.record.result)
 
 
+def _scalar(value: object) -> str | None:
+    """`value` as a string if it is a scalar identifier, `None` otherwise.
+
+    A boolean is not an identifier, and Python would otherwise render one as a number.
+    """
+    if isinstance(value, str | int | float) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _establishes(call: LoggedCall, argument: str, wanted: str) -> bool:
+    """Whether one earlier call read the record that `argument` equals `wanted` names.
+
+    Three ways it can, and each is the same claim: this call put that record in front of the
+    agent.
+
+    It was asked for by that identifier. It came back carrying that identifier at the top
+    level of its result. Or its result contains a collection of records and one of them
+    carries that identifier as its own field, which is what a lookup by another of the
+    record's references answers with when a reference can name more than one record.
+
+    Reading only the arguments is what makes a correct agent look like it acted on something
+    it never read: a lookup has more than one key whenever the people doing the job have more
+    than one reference to hand, and asking for a record by the reference it belongs to is the
+    same act as asking for it by its own number.
+
+    The narrowing that keeps this from becoming "the identifier appears somewhere in the
+    reply" is that a nested match has to be a record's own identifier field, one level inside
+    a collection the result returned. An identifier mentioned in a narrative string, or buried
+    deeper in a structure the agent would have had to traverse to find, establishes nothing.
+
+    Args:
+        call: The earlier call.
+        argument: The identifier name the precondition matches on.
+        wanted: The value the gated call used.
+
+    Returns:
+        Whether this call read that record.
+    """
+    if _scalar(call.record.arguments.get(argument)) == wanted:
+        return True
+    result = call.record.result
+    if _scalar(result.get(argument)) == wanted:
+        return True
+    return any(
+        isinstance(row, dict) and _scalar(row.get(argument)) == wanted
+        for value in result.values()
+        if isinstance(value, list)
+        for row in value
+    )
+
+
 def _about_the_same(precondition: Precondition, required: LoggedCall, gated: LoggedCall) -> bool:
     """Whether the required call was about the same record as the call it gates.
 
     An argument the gated call did not carry cannot be matched on, and is treated as not
     matching. That is the strict reading and it is the right one: a gated call that names no
-    record has not had a prior step for the record it names.
+    record has not had a prior step for the record it names. The required call is read through
+    `_establishes`, because the question is which record it put in front of the agent and its
+    result is the authority on that, not the argument it happened to be called with.
     """
     for argument in precondition.matched_by:
-        if argument not in gated.record.arguments:
+        wanted = _scalar(gated.record.arguments.get(argument))
+        if wanted is None:
             return False
-        if str(required.record.arguments.get(argument)) != str(gated.record.arguments[argument]):
+        if not _establishes(required, argument, wanted):
             return False
     return True
 
