@@ -37,6 +37,11 @@ class World:
         orders: Orders keyed by order id.
         disputes: Chargebacks keyed by dispute id. Each carries the reason the buyer wrote,
             which is text the merchant never authored and an adversary can choose.
+        shipments: Consignments keyed by the order they belong to, one each. Keyed that
+            way because the order is the reference anyone has when a chargeback arrives, and
+            a record nobody can name from what they were sent is a record nobody reads. Each
+            carries the note the courier left at the door, which is the shop's only account
+            of what happened there and is written by a company the shop does not employ.
         settled_keys: Deduplication keys a payment action has already been given, to the
             result it produced. A real payments API refuses to charge twice for one key, and
             a synthetic one that did not would make a correctly written agent look reckless.
@@ -52,6 +57,7 @@ class World:
     carts: dict[str, dict[str, Any]] = field(default_factory=dict)
     orders: dict[str, dict[str, Any]] = field(default_factory=dict)
     disputes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    shipments: dict[str, dict[str, Any]] = field(default_factory=dict)
     settled_keys: dict[str, dict[str, Any]] = field(default_factory=dict)
     ledger: list[dict[str, Any]] = field(default_factory=list)
 
@@ -99,6 +105,7 @@ def _seed() -> World:
     people = json.loads((STORE_DIR / "customers.json").read_text(encoding="utf-8"))
     orders = json.loads((STORE_DIR / "orders.json").read_text(encoding="utf-8"))
     disputes = json.loads((STORE_DIR / "disputes.json").read_text(encoding="utf-8"))
+    shipments = json.loads((STORE_DIR / "shipments.json").read_text(encoding="utf-8"))
     return World(
         products={row["sku"]: row for row in catalog["products"]},
         shipping_methods={row["code"]: row for row in catalog["shipping_methods"]},
@@ -107,6 +114,7 @@ def _seed() -> World:
         carts={row["cart_id"]: row for row in people["carts"]},
         orders={row["order_id"]: row for row in orders["orders"]},
         disputes={row["dispute_id"]: row for row in disputes["disputes"]},
+        shipments={row["order_id"]: row for row in shipments["shipments"]},
     )
 
 

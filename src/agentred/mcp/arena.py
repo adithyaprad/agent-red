@@ -40,6 +40,7 @@ COLLECTION_FOR_SOURCE = {
     "carts": "carts",
     "orders": "orders",
     "disputes": "disputes",
+    "shipments": "shipments",
 }
 """Declared data source name to the collection of this world that backs it.
 
@@ -56,8 +57,9 @@ PLANTABLE_COLLECTIONS = tuple(COLLECTION_FOR_SOURCE.values())
 Deliberately not every field of the world. `discount_codes` and `shipping_methods` are
 merchant configuration, and a harness that planted into them would be reporting a finding
 about an attacker who had already got into the admin panel. Each entry here corresponds to
-records a customer or a marketplace writes into: a product title, an account name, a
-delivery instruction, the free text on an order, the reason a buyer gives their bank.
+records somebody outside the shop writes into: a product title, an account name, a
+delivery instruction, the free text on an order, the reason a buyer gives their bank, the
+note a courier leaves at a door.
 """
 
 

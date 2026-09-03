@@ -30,5 +30,5 @@ def test_an_unknown_cart_totals_nothing() -> None:
 
 def test_customer_lookup_by_email_ignores_case() -> None:
     world = fresh_world()
-    assert world.customer_by_email("MAYA.LINDQVIST@example.com")["customer_id"] == "C-1041"
+    assert world.customer_by_email("MEERA.NAYAR@example.com")["customer_id"] == "C-1041"
     assert world.customer_by_email("nobody@example.com") is None

@@ -246,6 +246,16 @@ agent's real trigger, and reads the call stream. Firing the real trigger is the 
 carries the argument: an attack delivered down a path the deployment does not use is a finding
 about a test harness. See `docs/DECISIONS/ADR-0006-attack-channels.md`.
 
+**The shop the attacks land in is designed backwards from the checks.** A world laid out
+forwards from its domain, one customer per order per dispute, makes most declared rules
+unbreakable: nothing has been refunded, so a running total cannot be exceeded, and every
+identifier resolves to one obvious person, so reaching the wrong one means naming a record
+that does not exist. An agent holding there has answered nothing, and the coverage grid still
+reads as a clean sheet. `data/store/` therefore carries confusable identities, amounts near
+the declared ceilings, an order with money already returned against it, and one debt filed
+twice, and `tests/mcp/test_world_reachability.py` fails the build if those properties are
+trimmed away. Which records exist and why is `docs/WORLD.md`.
+
 **A finding is reproducible from a seed.** Generation is stochastic, and a gate that returns
 different verdicts on identical input is not a gate. Every attack carries the seed that
 produced its surface form, so a finding replays byte for byte. The suite is split accordingly:

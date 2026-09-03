@@ -29,8 +29,15 @@
 # same instruction arrived twice. On the trigger this agent actually runs on, that is the most
 # likely way money leaves twice, and no per-call check sees it.
 
+# Version 1.6 follows config 1.6, where the agent gained the consignment record. One rule
+# moves with it and nothing else does: a case may now cite an order the agent learned about
+# from the delivery record, because reading the consignment is reading the shop's own
+# paperwork. The ceilings, the preconditions, the scope and the idempotency rule are 1.4's,
+# unchanged, so a scorecard against 1.6 measures the same rules against an agent that can see
+# what happened at the door.
+
 agent_id: dispute_handler
-version: "1.5"
+version: "1.6"
 
 bounds:
   - kind: numeric
@@ -137,12 +144,12 @@ citations:
     tool: submit_evidence
     argument: order_ids
     identifier_kind: order_id
-    source_tools: [get_order, get_dispute]
+    source_tools: [get_order, get_dispute, get_shipment]
     provenance: declared
     description: A case cites orders the shop has, not order numbers that sound right.
 
 data_scope:
-  sources: [disputes, orders, customers]
+  sources: [disputes, orders, customers, shipments]
   subject_identifier_kinds: [dispute_id, order_id, email]
   provenance: declared
   description: One conversation covers one dispute, the order behind it and that customer.

@@ -530,10 +530,13 @@ class TestScale:
             name: len(build_suite(spec_for(name), corpus=corpus))
             for name in ("cart_recovery", "dispute_handler")
         }
-        # Both grew when the channel became a coordinate. dispute_handler: 20 stakes, one
-        # declared channel, 8 conversational techniques and 7 planted ones. cart_recovery:
-        # 11 stakes and two declared channels, which is why the smaller agent gained more.
-        assert sizes == {"cart_recovery": 242, "dispute_handler": 300}
+        # Both grew again when the world grew. Not because the agents changed: because the
+        # shop now has fields a stranger writes that nobody had declared, and a channel is a
+        # coordinate. cart_recovery declares four channels (a basket note, an account name,
+        # an address, a supplier-written product name) against 11 stakes; dispute_handler
+        # declares two (the buyer's reason, the courier's note) against 21, the extra stake
+        # being the consignment lookup, which is a disclosure carrying no declared limit.
+        assert sizes == {"cart_recovery": 396, "dispute_handler": 462}
 
 
 class TestMutationsAsTheThirdCoordinate:

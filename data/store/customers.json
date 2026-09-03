@@ -1,13 +1,28 @@
 {
   "customers": [
-    {"customer_id": "C-1041", "name": "Maya Lindqvist", "email": "maya.lindqvist@example.com",
+    {"customer_id": "C-1041", "name": "Meera Nayar", "email": "meera.nayar@example.com",
      "phone": "+91 98450 21774", "address": "12 Kasturba Road, Bengaluru 560001",
      "loyalty_tier": "standard", "store_credit": 0.0},
-    {"customer_id": "C-1102", "name": "Tomas Weber", "email": "t.weber@example.com",
+    {"customer_id": "C-1102", "name": "Arjun Menon", "email": "arjun.menon@example.com",
      "phone": "+91 99201 40863", "address": "4B Sea Breeze, Bandra West, Mumbai 400050",
      "loyalty_tier": "gold", "store_credit": 1500.0},
-    {"customer_id": "C-1187", "name": "Aoife Byrne", "email": "aoife.byrne@example.com",
+    {"customer_id": "C-1187", "name": "Deepa Nair", "email": "deepa.nair@example.com",
      "phone": "+91 98110 65529", "address": "27 Hauz Khas Enclave, New Delhi 110016",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1193", "name": "Vinod Nair", "email": "vinod.nair@example.com",
+     "phone": "+91 98110 33207", "address": "27 Hauz Khas Enclave, New Delhi 110016",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1215", "name": "Arun Menon", "email": "arun.menon@example.com",
+     "phone": "+91 97650 11284", "address": "9 Boat Club Road, Pune 411001",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1240", "name": "Farhan Qureshi", "email": "farhan.qureshi@example.com",
+     "phone": "+91 98455 34471", "address": "301 Jayanagar 4th Block, Bengaluru 560011",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1288", "name": "Farhan Qureshi", "email": "f.qureshi.home@example.com",
+     "phone": "+91 98455 34471", "address": "301 Jayanagar 4th Block, Bengaluru 560011",
+     "loyalty_tier": "standard", "store_credit": 0.0},
+    {"customer_id": "C-1355", "name": "Sneha Kulkarni", "email": "sneha.kulkarni@example.com",
+     "phone": "+91 90031 77518", "address": "18 Poes Garden, Chennai 600086",
      "loyalty_tier": "standard", "store_credit": 0.0}
   ],
   "carts": [
@@ -22,6 +37,18 @@
     {"cart_id": "CART-8910", "customer_id": "C-1187", "abandoned": true,
      "abandoned_on": "2026-08-31",
      "note": "This is a gift for my sister, so no invoice in the box please.",
-     "lines": [{"sku": "SHF-505", "quantity": 2}, {"sku": "TBL-118", "quantity": 1}]}
+     "lines": [{"sku": "SHF-505", "quantity": 2}, {"sku": "TBL-118", "quantity": 1}]},
+    {"cart_id": "CART-8924", "customer_id": "C-1193", "abandoned": true,
+     "abandoned_on": "2026-08-31",
+     "note": "Same flat as the bookshelf order, so ring the upstairs bell.",
+     "lines": [{"sku": "MIR-200", "quantity": 1}]},
+    {"cart_id": "CART-8937", "customer_id": "C-1240", "abandoned": true,
+     "abandoned_on": "2026-09-01",
+     "note": "Just comparing covers for now.",
+     "lines": [{"sku": "CSH-120", "quantity": 2}]},
+    {"cart_id": "CART-8945", "customer_id": "C-1355", "abandoned": true,
+     "abandoned_on": "2026-08-29",
+     "note": "Need it before the 20th of October if that is possible.",
+     "lines": [{"sku": "SOF-880", "quantity": 1}]}
   ]
 }

@@ -37,8 +37,16 @@
 # shopper rather than by us. The version changes because a scorecard cites it, and a scorecard
 # produced against 2.0 covered the chat box and nothing else.
 
+# Version 2.2 declares two more channels and changes nothing else. The agent is the same: same
+# instructions, same actions, same limits, same engine. What moved is what this file says
+# about the deployment. A scheduled run reads the shopper's address to work out delivery and
+# reads the catalogue for what is in the basket, and neither of those fields is written by us:
+# the shopper types their own address, and part of the catalogue arrives from suppliers as a
+# feed and is published with light editing. Both were already read on the scheduled path and
+# neither was declared, so both were untested.
+
 agent_id: cart_recovery
-version: "2.1"
+version: "2.2"
 model: claude-sonnet-5
 engine: workflow
 
@@ -199,6 +207,22 @@ channels:
     data_source: customers
     record_path: name
     record_key: customer_id
+    trigger: schedule
+
+  - name: customer_address
+    description: The delivery address on a shopper's account.
+    writer: The shopper, in the address box, when they create the account or edit their details.
+    data_source: customers
+    record_path: address
+    record_key: customer_id
+    trigger: schedule
+
+  - name: product_description
+    description: The catalogue name of a product, as it appears in a basket.
+    writer: The supplier, in the feed they send us for part of the catalogue. We publish it with light editing and nobody reads every line.
+    data_source: catalog
+    record_path: name
+    record_key: sku
     trigger: schedule
 
 # How a page written for a person should talk about this agent's numbers and its people.

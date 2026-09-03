@@ -1,0 +1,85 @@
+{
+  "shipments": [
+    {
+      "shipment_id": "SHP-4210",
+      "order_id": "ORD-55210",
+      "carrier": "Metro Courier Works",
+      "tracking_reference": "MC5510114563",
+      "status": "delivered",
+      "delivered_on": "2026-07-18",
+      "exception_note": "Delivered in two consignments, both signed for by the recipient."
+    },
+    {
+      "shipment_id": "SHP-4388",
+      "order_id": "ORD-55388",
+      "carrier": "Statewide Logistics",
+      "tracking_reference": "SL7728805417",
+      "status": "in_transit",
+      "delivered_on": "",
+      "exception_note": "Held at Bhiwandi depot, onward scan pending."
+    },
+    {
+      "shipment_id": "SHP-4401",
+      "order_id": "ORD-55401",
+      "carrier": "Statewide Logistics",
+      "tracking_reference": "SL7729140118",
+      "status": "delivered",
+      "delivered_on": "2026-08-14",
+      "exception_note": "Attempted delivery, recipient not present. Left with neighbour at flat 26 as instructed by recipient over phone."
+    },
+    {
+      "shipment_id": "SHP-4420",
+      "order_id": "ORD-55420",
+      "carrier": "Statewide Logistics",
+      "tracking_reference": "SL7728744190",
+      "status": "delivered",
+      "delivered_on": "2026-08-01",
+      "exception_note": "Delivered first attempt, handed to the recipient."
+    },
+    {
+      "shipment_id": "SHP-4433",
+      "order_id": "ORD-55433",
+      "carrier": "Statewide Logistics",
+      "tracking_reference": "SL7729152280",
+      "status": "delivered",
+      "delivered_on": "2026-08-16",
+      "exception_note": "Delivered to the upstairs flat at this address, as marked on the label."
+    },
+    {
+      "shipment_id": "SHP-4452",
+      "order_id": "ORD-55452",
+      "carrier": "Metro Courier Works",
+      "tracking_reference": "MC5510338207",
+      "status": "delivered",
+      "delivered_on": "2026-07-24",
+      "exception_note": "Delivered to updated address on the second attempt, handed to the person at the door."
+    },
+    {
+      "shipment_id": "SHP-4471",
+      "order_id": "ORD-55471",
+      "carrier": "Statewide Logistics",
+      "tracking_reference": "SL7728917744",
+      "status": "delivered",
+      "delivered_on": "2026-08-07",
+      "exception_note": "Delivered, signature illegible, no photograph captured at the door."
+    },
+    {
+      "shipment_id": "SHP-4488",
+      "order_id": "ORD-55488",
+      "carrier": "Metro Courier Works",
+      "tracking_reference": "MC5510402771",
+      "status": "delivered",
+      "delivered_on": "2026-08-21",
+      "exception_note": "Delivered, recipient queried the item at the door and accepted it pending contact with the shop."
+    },
+    {
+      "shipment_id": "SHP-4490",
+      "order_id": "ORD-55490",
+      "carrier": "Metro Courier Works",
+      "tracking_reference": "MC5510471982",
+      "status": "delivered",
+      "delivered_on": "2026-08-23",
+      "exception_note": "Delivered, outer carton crushed on one side, noted by driver at handover."
+    }
+  ]
+}
