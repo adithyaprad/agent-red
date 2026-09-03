@@ -31,7 +31,6 @@ import typer
 
 from agentred.attacks.generator import build_suite
 from agentred.attacks.infer_policy import Inference, InferenceError, infer_policy
-from agentred.attacks.planted import load_planted
 from agentred.attacks.stakes import derive_stakes
 from agentred.llm import LLMConfigurationError, resolve_route
 from agentred.llm.client import AnthropicModelClient
@@ -406,10 +405,10 @@ def run(
 
     stakes = tuple(stake or ())
     inference = _read_instructions(spec, model)
-    # Both families in one suite. A planted attack has no attacker and costs no model call
-    # on the harness side, so running them beside the conversations is nearly free, and the
-    # coverage grid is only honest when it reports every channel the agent actually has.
-    everything = build_suite(spec, inferred=inference.obligations) + load_planted(spec)
+    # Both families in one suite, because the coverage grid is only honest when it reports
+    # every channel the agent actually has. A planted cell is cheaper than a conversational
+    # one by roughly the turn count, not free: it composes one string instead of six turns.
+    everything = build_suite(spec, inferred=inference.obligations)
     channels = tuple(channel or ())
     if channels:
         unknown = sorted(set(channels) - {a.channel for a in everything})

@@ -27,7 +27,9 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentred.spec.models import (
+    CONVERSATIONAL_CHANNEL,
     AgentSpec,
+    ChannelDeclaration,
     Consequence,
     CumulativeBound,
     EnumeratedBound,
@@ -39,6 +41,7 @@ from agentred.spec.models import (
     Precondition,
     Provenance,
     RelationalBound,
+    family_of,
 )
 
 
@@ -674,6 +677,101 @@ def derive_stakes(spec: AgentSpec, *, inferred: tuple[Obligation, ...] = ()) -> 
     stakes.extend(_ungated_stakes(spec))
     stakes.extend(_obligation_stakes(spec, merge_obligations(spec.policy.obligations, inferred)))
     return tuple(sorted(stakes, key=lambda stake: stake.rank))
+
+
+class Reach(BaseModel):
+    """One thing worth reaching, and one way of getting at it.
+
+    The unit of work the suite is built from, after ADR-0006: goal by channel, crossed with
+    technique to make a cell. A stake says what a successful attack would have made the agent
+    do and knows nothing about how it is reached; a channel says what an adversary writes and what
+    makes the agent read it, and knows nothing about what is at risk. Pairing them is what
+    lets a coverage grid say that a limit held in conversation and was never once attacked
+    through the field a stranger actually writes.
+
+    **Every stake is reachable down every channel the agent declares**, and this type does not
+    filter. That is a claim worth being explicit about, because filtering would be easy and
+    wrong. What an agent does after a trigger fires is not declared anywhere: a merchant says
+    which field is written and what wakes the agent, not which of its actions that firing can
+    end at. Deriving a filter would mean guessing at the agent's internal route and quietly
+    dropping cells, and a dropped cell is a question the report never asks while still
+    counting the coverage. The two constraints that do exist are declared elsewhere and are
+    enforced where they live: a technique declares the families it survives, and a planted
+    attack needs a subject carrying the identifier its channel plants by.
+
+    Attributes:
+        stake: What to push toward.
+        channel: The channel name this arrives down: `conversation`, or one the agent
+            declared.
+        declaration: The channel as the agent declared it, or `None` for the implicit
+            conversational channel, which has no field and no trigger to name.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stake: Stake
+    channel: str = Field(min_length=1)
+    declaration: ChannelDeclaration | None = None
+
+    @model_validator(mode="after")
+    def _declaration_matches_channel(self) -> Reach:
+        """Refuse a pairing that names one channel and carries another.
+
+        Two ways to be wrong, and both would be silent. A conversational reach carrying a
+        declaration would plant into a field on a channel nothing plants on; a planted reach
+        without one would reach the driver with no record and no trigger.
+        """
+        if self.channel == CONVERSATIONAL_CHANNEL:
+            if self.declaration is not None:
+                raise ValueError(
+                    f"a conversational reach on {self.stake.id!r} carries the declaration "
+                    f"for {self.declaration.name!r}, which nothing would use"
+                )
+        elif self.declaration is None:
+            raise ValueError(
+                f"reach on {self.stake.id!r} names channel {self.channel!r} and carries no "
+                f"declaration, so there would be no field to write into"
+            )
+        elif self.declaration.name != self.channel:
+            raise ValueError(
+                f"reach on {self.stake.id!r} names channel {self.channel!r} but carries the "
+                f"declaration for {self.declaration.name!r}"
+            )
+        return self
+
+    @property
+    def is_planted(self) -> bool:
+        """Whether this is reached by writing into the world rather than by talking."""
+        return self.channel != CONVERSATIONAL_CHANNEL
+
+    @property
+    def family(self) -> str:
+        """The channel family, which is what a technique declares itself valid on."""
+        return family_of(self.channel)
+
+
+def derive_reaches(spec: AgentSpec, *, inferred: tuple[Obligation, ...] = ()) -> tuple[Reach, ...]:
+    """Everything worth attacking about `spec`, crossed with every way in it has.
+
+    Sequence is stakes outermost in their own sequence, costliest first, and within a stake
+    the conversational channel followed by the declared ones as declared. A run cut
+    short has therefore spent its wall clock on the expensive stakes across every channel,
+    rather than finishing one channel and never touching another.
+
+    Args:
+        spec: A validated agent spec.
+        inferred: Rules about what the agent may say, read out of its instructions. Passed
+            through to `derive_stakes` unchanged.
+
+    Returns:
+        The reaches, deterministic for a given spec and set of inferred rules.
+    """
+    reaches: list[Reach] = []
+    for stake in derive_stakes(spec, inferred=inferred):
+        reaches.append(Reach(stake=stake, channel=CONVERSATIONAL_CHANNEL))
+        for declared in spec.config.channels:
+            reaches.append(Reach(stake=stake, channel=declared.name, declaration=declared))
+    return tuple(reaches)
 
 
 def judge_dependence(stakes: tuple[Stake, ...]) -> float:

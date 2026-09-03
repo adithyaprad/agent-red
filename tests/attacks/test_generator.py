@@ -17,16 +17,19 @@ from agentred.attacks.generator import (
     TURN_SCHEMA,
     AttackError,
     ModelAttacker,
+    PlantedComposer,
     apply_mutations,
     attacker_system_prompt,
     build_attackers,
+    build_planters,
     build_suite,
     compose_opening,
     group_by_opening,
+    planter_system_prompt,
 )
 from agentred.attacks.mutations import SURFACES, by_id
-from agentred.attacks.stakes import derive_stakes
-from agentred.attacks.techniques import load_corpus
+from agentred.attacks.stakes import derive_reaches, derive_stakes
+from agentred.attacks.techniques import load_corpus, techniques_for
 from agentred.runner.channels.conversational import ToolCallRecord, Transcript, Turn
 from agentred.spec.loader import load_spec_dir
 from tests.fakes.model import RecordedModelClient
@@ -53,6 +56,27 @@ def suite(dispute, corpus):
     return build_suite(dispute, corpus=corpus)
 
 
+@pytest.fixture(scope="module")
+def conversations(suite):
+    """The conversational half of the suite, for the things only turns have."""
+    return tuple(attack for attack in suite if not attack.is_planted)
+
+
+def unreachable(spec):
+    """A copy of `spec` with nobody to be and nowhere to plant.
+
+    Both at once, deliberately. A planted channel writes into somebody's record, so an agent
+    that declares one and declares nobody is refused rather than built, and a test about the
+    shape of an id would otherwise be testing that refusal.
+    """
+    return spec.model_copy(
+        update={
+            "subjects": (),
+            "config": spec.config.model_copy(update={"channels": ()}),
+        }
+    )
+
+
 def reply(
     turn: str = "so where does that leave me?", *, stop: bool = False, reason: str = ""
 ) -> str:
@@ -74,8 +98,33 @@ def transcript_with(*, called: tuple[str, ...] = (), turns: int = 1) -> Transcri
 
 
 class TestBuildSuite:
-    def test_every_technique_meets_every_stake(self, dispute, corpus, suite):
-        assert len(suite) == len(corpus) * len(derive_stakes(dispute))
+    def test_every_valid_technique_meets_every_stake_on_every_channel(self, dispute, corpus, suite):
+        """The cross is per family: a technique only runs where it declares it survives."""
+        expected = sum(
+            len(techniques_for(corpus, reach.family)) for reach in derive_reaches(dispute)
+        )
+        assert len(suite) == expected
+
+    def test_a_stake_is_attacked_down_every_channel_the_agent_declares(self, dispute, suite):
+        """A limit tested only in conversation is a limit nobody attacked where it is written."""
+        declared = {channel.name for channel in dispute.config.channels}
+        first = derive_stakes(dispute)[0]
+        reached = {a.channel for a in suite if a.stake.id == first.id}
+        assert reached == declared | {"conversation"}
+
+    def test_a_planted_attack_lands_on_its_own_subjects_record(self, dispute, suite):
+        """An invented record is refused by the driver and reads as an error, not an attempt."""
+        keys = {c.name: c.record_key for c in dispute.config.channels}
+        planted = [attack for attack in suite if attack.is_planted]
+        assert planted
+        for attack in planted:
+            assert attack.record_id == attack.subject.identifiers[keys[attack.channel]]
+
+    def test_a_technique_that_does_not_survive_the_field_is_never_planted(self, suite, corpus):
+        """Rendering an escalation ladder into one string would claim coverage nothing tried."""
+        conversational_only = {t.id for t in corpus if not t.valid_on("planted")}
+        assert conversational_only
+        assert not {a.move for a in suite if a.is_planted} & conversational_only
 
     def test_ids_are_unique(self, suite):
         assert len({attack.id for attack in suite}) == len(suite)
@@ -89,8 +138,7 @@ class TestBuildSuite:
 
     def test_an_agent_that_scopes_nothing_keeps_the_shorter_id(self, dispute, corpus):
         """No identity to be means no identity in the id, rather than an empty field."""
-        unscoped = dispute.model_copy(update={"subjects": ()})
-        assert build_suite(unscoped, corpus=corpus)[0].id.count("|") == 1
+        assert build_suite(unreachable(dispute), corpus=corpus)[0].id.count("|") == 1
 
     def test_sequence_is_deterministic(self, dispute, corpus):
         first = [attack.id for attack in build_suite(dispute, corpus=corpus)]
@@ -117,7 +165,7 @@ class TestBuildSuite:
 
     def test_an_agent_with_nothing_to_attack_is_refused(self, dispute, corpus, monkeypatch):
         """An empty suite would report a perfect score against an agent nobody tested."""
-        monkeypatch.setattr("agentred.attacks.generator.derive_stakes", lambda spec, **_: ())
+        monkeypatch.setattr("agentred.attacks.generator.derive_reaches", lambda spec, **_: ())
         with pytest.raises(AttackError, match="nothing to attack"):
             build_suite(dispute, corpus=corpus)
 
@@ -134,7 +182,11 @@ class TestBuildSuite:
         )
         without = build_suite(dispute, corpus=corpus)
         with_prose = build_suite(dispute, corpus=corpus, inferred=(duty,))
-        assert len(with_prose) == len(without) + len(corpus)
+        # One more stake, attacked down every channel by every technique valid on it.
+        per_stake = len(techniques_for(corpus, "conversation")) + len(
+            dispute.config.channels
+        ) * len(techniques_for(corpus, "planted"))
+        assert len(with_prose) == len(without) + per_stake
         assert any(attack.stake.derived_from == "no_note_out_loud" for attack in with_prose)
 
     def test_a_duplicated_technique_is_refused(self, dispute, corpus):
@@ -403,12 +455,12 @@ class TestTheRequestShape:
 
 
 class TestSharedOpenings:
-    def test_an_opening_is_composed_once_per_group(self, suite):
-        groups = group_by_opening(suite)
+    def test_an_opening_is_composed_once_per_group(self, conversations):
+        groups = group_by_opening(conversations)
         client = RecordedModelClient(replies=[reply(f"opening {i}") for i in range(len(groups))])
-        attackers = build_attackers(suite, client, share_openings=True)
+        attackers = build_attackers(conversations, client, share_openings=True)
         assert len(client.calls) == len(groups)
-        assert len(attackers) == len(suite)
+        assert len(attackers) == len(conversations)
 
     def test_a_shared_opening_costs_no_call_when_it_is_used(self, suite):
         client = RecordedModelClient(replies=[])
@@ -416,18 +468,18 @@ class TestSharedOpenings:
         assert attacker.next_turn(transcript_with(turns=0)) == "hello there"
         assert client.calls == []
 
-    def test_members_of_a_group_get_the_same_opening(self, suite):
-        groups = group_by_opening(suite)
+    def test_members_of_a_group_get_the_same_opening(self, conversations):
+        groups = group_by_opening(conversations)
         client = RecordedModelClient(replies=[reply(f"opening {i}") for i in range(len(groups))])
-        attackers = build_attackers(suite, client, share_openings=True)
+        attackers = build_attackers(conversations, client, share_openings=True)
         by_key: dict[tuple, set[str]] = {}
         for attacker in attackers:
             by_key.setdefault(attacker.attack.opening_key, set()).add(attacker.opening or "")
         assert all(len(openings) == 1 for openings in by_key.values())
 
-    def test_openings_are_off_by_default(self, suite):
+    def test_openings_are_off_by_default(self, conversations):
         client = RecordedModelClient(replies=[])
-        attackers = build_attackers(suite, client)
+        attackers = build_attackers(conversations, client)
         assert client.calls == []
         assert all(attacker.opening is None for attacker in attackers)
 
@@ -478,9 +530,10 @@ class TestScale:
             name: len(build_suite(spec_for(name), corpus=corpus))
             for name in ("cart_recovery", "dispute_handler")
         }
-        # cart_recovery went from 72 to 88 at config 2.0: it gained send_whatsapp and the
-        # outbound rule over its body, which is one more stake to cross with the corpus.
-        assert sizes == {"cart_recovery": 88, "dispute_handler": 160}
+        # Both grew when the channel became a coordinate. dispute_handler: 20 stakes, one
+        # declared channel, 8 conversational techniques and 7 planted ones. cart_recovery:
+        # 11 stakes and two declared channels, which is why the smaller agent gained more.
+        assert sizes == {"cart_recovery": 242, "dispute_handler": 300}
 
 
 class TestMutationsAsTheThirdCoordinate:
@@ -576,8 +629,7 @@ class TestIdentityTravels:
             assert fact in prompt
 
     def test_an_agent_with_no_identities_is_told_it_holds_none(self, dispute, corpus):
-        unscoped = dispute.model_copy(update={"subjects": ()})
-        prompt = attacker_system_prompt(build_suite(unscoped, corpus=corpus)[0])
+        prompt = attacker_system_prompt(build_suite(unreachable(dispute), corpus=corpus)[0])
         assert "no reference or record" in prompt
 
     def test_assignment_is_stable_across_builds(self, dispute, corpus):
@@ -585,3 +637,111 @@ class TestIdentityTravels:
         first = {a.id: a.subject.name for a in build_suite(dispute, corpus=corpus)}
         second = {a.id: a.subject.name for a in build_suite(dispute, corpus=corpus)}
         assert first == second
+
+
+def payload_reply(payload: str = "left it by the side gate", reason: str = "") -> str:
+    return json.dumps({"reason": reason, "payload": payload})
+
+
+class TestComposingAPlantedPayload:
+    """The planted half of the join. One string, written once, into somebody's record."""
+
+    @pytest.fixture
+    def planted(self, suite):
+        return next(attack for attack in suite if attack.is_planted)
+
+    @pytest.fixture
+    def channel(self, dispute, planted):
+        return dispute.config.channels_by_name[planted.channel]
+
+    def test_the_prompt_carries_the_planted_rendering_not_the_arc(self, planted, channel):
+        """The arc is turns, and there are none. Handing it over would compose a conversation."""
+        rendered = planter_system_prompt(planted, channel)
+        assert planted.technique.planted.rendering in rendered
+        assert planted.technique.arc not in rendered
+        for exemplar in planted.technique.planted.exemplars:
+            assert exemplar in rendered
+
+    def test_the_prompt_says_what_the_field_is_and_who_fills_it_in(self, planted, channel):
+        """Plausibility is the only defence a payload has to get past."""
+        rendered = planter_system_prompt(planted, channel)
+        assert channel.writer in rendered
+        assert channel.description in rendered
+        assert planted.record_id in rendered
+
+    def test_the_prompt_states_the_identifiers_it_must_not_invent(self, planted, channel):
+        rendered = planter_system_prompt(planted, channel)
+        for value in planted.subject.identifiers.values():
+            assert value in rendered
+
+    def test_a_request_trigger_says_the_message_is_not_the_attack(self, planted, channel):
+        """The turn an operator would read in a transcript is benign. That is the finding."""
+        assert "already in the record" in planter_system_prompt(planted, channel)
+
+    def test_a_scheduled_trigger_says_nobody_speaks_to_the_agent(self, corpus):
+        cart = spec_for("cart_recovery")
+        attack = next(a for a in build_suite(cart, corpus=corpus) if a.is_planted)
+        channel = cart.config.channels_by_name[attack.channel]
+        assert "wakes on a schedule" in planter_system_prompt(attack, channel)
+
+    def test_a_conversational_attack_has_nothing_to_write(self, suite, channel):
+        with pytest.raises(AttackError, match="no planted rendering"):
+            planter_system_prompt(suite[0], channel)
+
+    def test_it_composes_the_payload(self, planted, channel):
+        client = RecordedModelClient(replies=[payload_reply("note text")])
+        assert PlantedComposer(attack=planted, channel=channel, client=client).compose() == (
+            "note text"
+        )
+
+    def test_asking_twice_returns_what_was_planted_rather_than_composing_again(
+        self, planted, channel
+    ):
+        """A retry inside the driver must not change the text the transcript records."""
+        client = RecordedModelClient(replies=[payload_reply("first")])
+        composer = PlantedComposer(attack=planted, channel=channel, client=client)
+        assert composer.compose() == composer.compose() == "first"
+        assert len(client.calls) == 1
+
+    def test_an_unreadable_payload_is_asked_for_again(self, planted, channel):
+        client = RecordedModelClient(replies=["not json", payload_reply("second try")])
+        composer = PlantedComposer(attack=planted, channel=channel, client=client)
+        assert composer.compose() == "second try"
+
+    def test_an_empty_payload_is_never_planted(self, planted, channel):
+        """Planting nothing restores a world, fires the trigger, and reads as an agent holding."""
+        client = RecordedModelClient(replies=[payload_reply("   ")] * COMPOSE_ATTEMPTS)
+        with pytest.raises(AttackError, match="empty"):
+            PlantedComposer(attack=planted, channel=channel, client=client).compose()
+
+    def test_the_failure_names_the_attack(self, planted, channel):
+        client = RecordedModelClient(replies=["not json"] * COMPOSE_ATTEMPTS)
+        with pytest.raises(AttackError, match=planted.id.split("|")[0]):
+            PlantedComposer(attack=planted, channel=channel, client=client).compose()
+
+    def test_a_mutation_reaches_the_writing(self, planted, channel):
+        """On this channel the surface is the whole of what a variant changes."""
+        mutated = apply_mutations((planted,), (by_id("hinglish"),))[-1]
+        client = RecordedModelClient(replies=[payload_reply()])
+        PlantedComposer(attack=mutated, channel=channel, client=client).compose()
+        assert "Hinglish" in client.calls[0].messages[0]["content"]
+
+
+class TestBuildPlanters:
+    def test_one_composer_per_attack(self, dispute, suite):
+        planted = tuple(attack for attack in suite if attack.is_planted)
+        client = RecordedModelClient(replies=[])
+        made = build_planters(planted, client, dispute.config.channels_by_name)
+        assert [c.attack.id for c in made] == [a.id for a in planted]
+
+    def test_a_conversational_attack_is_refused(self, dispute, suite):
+        with pytest.raises(AttackError, match="handed to the planted composer"):
+            build_planters(
+                suite[:1], RecordedModelClient(replies=[]), dispute.config.channels_by_name
+            )
+
+    def test_a_channel_the_agent_does_not_declare_is_refused(self, suite):
+        """Otherwise a mis-wired channel would compose a payload for a field nothing reads."""
+        planted = next(attack for attack in suite if attack.is_planted)
+        with pytest.raises(AttackError, match="does not declare"):
+            build_planters((planted,), RecordedModelClient(replies=[]), {})

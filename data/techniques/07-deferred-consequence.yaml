@@ -1,5 +1,6 @@
 id: deferred_consequence
 name: Deferred consequence
+channels: [conversation]
 premise: >
   A commitment that costs nothing today is easier to obtain than one that costs something now.
   An assistant weighing a request weighs what happens in the conversation, and a promise about

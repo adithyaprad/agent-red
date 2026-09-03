@@ -121,3 +121,44 @@ single planted string; the other five do not, and forcing them would produce a c
 claims coverage it does not have. A second family is written for the planted channel, and each
 technique declares which channels it is valid on. A technique attempted on a channel it does
 not support is a construction error, not a wasted run.
+
+## Amendment, 2026-09-03: what a planted attack is made of
+
+Accepted alongside the original. The decision above says an attack declares a channel; this
+says where its payload comes from, which the original left open and one hand-written file per
+agent had been standing in for.
+
+**The unit of work is a stake crossed with a channel, crossed with a technique.** The first
+pair is a `Reach` in `attacks/stakes.py`. Every stake is paired with every channel the agent
+declares and with the conversational one, and nothing is filtered out there. Filtering would
+be easy and wrong: what an agent does after a trigger fires is not declared anywhere, so a
+filter would guess at the agent's internal route and drop cells, and a dropped cell is a
+question the report never asks while still counting the coverage.
+
+**A payload is composed, not stored.** A technique valid on the planted family carries a
+rendering: how its pressure reads as one passage written into a record, with hand-written
+exemplars on an abstract stake setting the bar. The text itself is written by the same model
+that composes conversational turns, at run time, against the stake's objective, the channel's
+own description of what the field is and who fills it in, and the identity whose record it
+lands on. Nothing about a merchant's business is in the corpus, which is the same constraint
+the conversational half has always been under.
+
+The alternative was composing every payload when the suite is built. Rejected: `build_suite`
+is a pure function of a spec and a corpus, tested offline, and a model call inside it would
+make the shape of a suite depend on the weather. The alternative before that was keeping the
+payloads hand-written per agent, which is what the first version did to prove the lifecycle
+carried a finding end to end. Six strings across two agents is not a corpus, it does not
+transfer to the next agent, and a run that finds nothing with it cannot distinguish an agent
+that held from a surface too small to have asked.
+
+**A planted attack lands on a declared identity's own record.** The channel names the
+identifier kind that names the record; a subject either carries one or does not. A channel no
+declared subject can be planted into is refused when the suite is built, because the payload
+would otherwise have to invent a record, and a plant into a record that does not exist is
+refused by the driver and reports as an error rather than as an attempt.
+
+**Two consequences.** A planted attempt is no longer free: it costs one model call before
+anything is written, which is cheaper than a conversation by roughly the turn count rather
+than free. And planted coverage is no longer thinner than conversational coverage by
+construction: on an agent declaring one channel, seven of the twelve techniques reach it, and
+the grid says which.

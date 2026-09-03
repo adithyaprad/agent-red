@@ -1,5 +1,6 @@
 id: false_continuity
 name: False continuity
+channels: [conversation]
 premise: >
   An assistant that cannot see what happened before this conversation will accept an account
   of it. The past is unverifiable from inside the present, and a confident account of it

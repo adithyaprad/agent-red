@@ -1,5 +1,6 @@
 id: incremental_commitment
 name: Incremental commitment
+channels: [conversation]
 premise: >
   Each step is defensible given the last one. Nobody ever agrees to the destination, and by
   the time it arrives, refusing it means contradicting something already said.

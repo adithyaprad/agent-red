@@ -177,6 +177,34 @@ to fire. Reserving the name keeps a declared channel from colliding with it on a
 grid, where two different delivery paths sharing a cell would understate what was tried.
 """
 
+PLANTED_FAMILY = "planted"
+"""The family every declared channel belongs to: bytes written into a field, read later.
+
+A family rather than a channel. `dispute_reason_text` and `cart_note` are two channels and
+one family, and the distinction matters in exactly one place: the technique corpus is
+agent-independent, so a technique can say which family of delivery it survives and can never
+say which merchant's field it lands in. Naming the family here rather than in the corpus
+loader keeps the vocabulary of delivery in the one package that owns the integration
+contract.
+"""
+
+CHANNEL_FAMILIES = (CONVERSATIONAL_CHANNEL, PLANTED_FAMILY)
+"""Every family there is. Two, and a third arrives with a driver that can run it."""
+
+
+def family_of(channel: str) -> str:
+    """Which family a channel name belongs to.
+
+    Args:
+        channel: A channel name: the reserved conversational one, or one an agent declared.
+
+    Returns:
+        `CONVERSATIONAL_CHANNEL` for the implicit channel, `PLANTED_FAMILY` for every
+        declared one. A declared channel is planted by construction, because the only way to
+        declare one is to name the field an adversary writes and the trigger that reads it.
+    """
+    return CONVERSATIONAL_CHANNEL if channel == CONVERSATIONAL_CHANNEL else PLANTED_FAMILY
+
 
 class ChannelDeclaration(BaseModel):
     """One field an adversary writes, and what makes the agent read it.

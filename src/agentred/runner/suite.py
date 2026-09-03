@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentred.attacks.generator import Attack, build_attackers
+from agentred.attacks.generator import Attack, build_attackers, build_planters
 from agentred.judge.detectors import run_detectors
 from agentred.judge.models import Finding
 from agentred.judge.models import Outcome as JudgeOutcome
@@ -280,8 +280,9 @@ def run_one(
 
     Args:
         attack: What is being run, carried onto the outcome.
-        attacker: The composed attacker for it. Unused by a planted attack, which has no
-            turns to compose.
+        attacker: What composes this attack's writing: turn by turn against what the agent
+            said, or once, into the field it plants. Both are model-backed, and a planted
+            attempt costs one call before anything is written.
         lease: Asked for a token as this attempt starts, so a suite longer than the
             consent window renews rather than being refused by its own gate.
         max_turns: Per-conversation budget. Not applicable to a planted attempt, which fires
@@ -309,13 +310,12 @@ def run_one(
                     f"this agent does not declare. Attacking a channel the deployment does "
                     f"not have would report a finding about the harness."
                 )
-            assert attack.planted is not None  # guaranteed by Attack.__post_init__
             transcript = run_planted(
                 token,
                 declared,
-                attack.planted.text,
+                attacker.compose(),
                 run=run,
-                record_id=attack.planted.record_id,
+                record_id=attack.record_id,
                 goal=attack.goal,
                 subject=subject,
                 subject_kinds=subject_kinds,
@@ -392,10 +392,16 @@ def execute(
     started = time.monotonic()
     order = {attack.id: index for index, attack in enumerate(attacks)}
 
-    # A planted attack composes no turns, so it gets no attacker and costs no model call on
-    # the harness side. Handing one to `build_attackers` is refused there rather than here.
+    channels = spec.config.channels_by_name
+    # One composer per attack, of whichever kind the channel calls for. A planted attack
+    # writes one string rather than a conversation, so it is cheaper by roughly the turn
+    # count and is not free: the payload is composed by the same model, against the same
+    # technique, and each one is labelled with the attack it belongs to so the bill can be
+    # read per cell.
     attackers = [
-        None
+        build_planters((attack,), RecordingModelClient(inner, recorder, label=attack.id), channels)[
+            0
+        ]
         if attack.is_planted
         else build_attackers(
             (attack,),
@@ -404,7 +410,6 @@ def execute(
         )[0]
         for attack in attacks
     ]
-    channels = spec.config.channels_by_name
 
     run.number = number
     store = Store(store_path) if store_path is not None else None

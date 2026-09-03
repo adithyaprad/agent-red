@@ -256,9 +256,18 @@ class TestChannelDispatch:
         return load_spec_dir("src/agentred/targets/specs/dispute_handler")
 
     def _planted_attack(self):
-        from agentred.attacks.planted import load_planted
+        from agentred.attacks.generator import build_suite
 
-        return load_planted(self._spec())[0]
+        return next(attack for attack in build_suite(self._spec()) if attack.is_planted)
+
+    def _planter(self, attack, text="planted text"):
+        """A composer that writes a known string, so the dispatch test needs no model."""
+
+        class Planter:
+            def compose(self):
+                return text
+
+        return Planter()
 
     def _lease(self):
         class Lease:
@@ -286,13 +295,18 @@ class TestChannelDispatch:
         monkeypatch.setattr(suite_module, "run_conversation", never)
 
         outcome = suite_module.run_one(
-            attack, None, self._lease(), 6, "run-x", self._spec().config.channels_by_name
+            attack,
+            self._planter(attack),
+            self._lease(),
+            6,
+            "run-x",
+            self._spec().config.channels_by_name,
         )
 
         assert outcome.error == ""
         assert seen["channel"] == "dispute_reason_text"
-        assert seen["record_id"] == attack.planted.record_id
-        assert seen["payload"] == attack.planted.text
+        assert seen["record_id"] == attack.record_id
+        assert seen["payload"] == "planted text"
 
     def test_a_conversational_attack_goes_to_the_conversation_driver(
         self, monkeypatch: pytest.MonkeyPatch
@@ -317,7 +331,7 @@ class TestChannelDispatch:
         attack = self._planted_attack()
         monkeypatch.setattr(suite_module, "run_planted", lambda *a, **k: transcript_for(attack))
 
-        outcome = suite_module.run_one(attack, None, self._lease(), 6, "run-x", {})
+        outcome = suite_module.run_one(attack, self._planter(attack), self._lease(), 6, "run-x", {})
 
         assert outcome.transcript is None
         assert "does not declare" in outcome.error

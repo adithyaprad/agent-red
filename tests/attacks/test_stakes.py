@@ -1,11 +1,14 @@
 """Stakes derivation: what an agent's own declarations say is worth attacking."""
 
 import pytest
+from pydantic import ValidationError
 
 from agentred.attacks.stakes import (
+    Reach,
     Settlement,
     Stake,
     StakeKind,
+    derive_reaches,
     derive_stakes,
     judge_dependence,
     merge_obligations,
@@ -379,3 +382,104 @@ class TestAgainstTheShippedTargets:
     def test_most_stakes_are_settled_without_a_model(self, target):
         """If this ever fails, the scorecard has quietly become an opinion."""
         assert judge_dependence(derive_stakes(target)) < 0.5
+
+
+class TestReaches:
+    """Goal crossed with channel: the unit of work, after ADR-0006."""
+
+    @pytest.fixture(scope="class", params=["cart_recovery", "dispute_handler"])
+    @staticmethod
+    def target(request):
+        from agentred.spec.loader import load_spec_dir
+
+        return load_spec_dir(f"src/agentred/targets/specs/{request.param}")
+
+    def test_every_stake_is_reachable_down_every_channel(self, target):
+        """Nothing is filtered here, and the count is the claim the coverage grid makes."""
+        stakes = derive_stakes(target)
+        ways_in = 1 + len(target.config.channels)
+        assert len(derive_reaches(target)) == len(stakes) * ways_in
+
+    def test_conversation_comes_first_for_each_stake(self, target):
+        """A run cut short keeps the channel every agent has, rather than losing it."""
+        reaches = derive_reaches(target)
+        first = reaches[0]
+        assert first.channel == "conversation"
+        assert not first.is_planted
+
+    def test_a_stakes_reaches_are_adjacent(self, target):
+        """Which is what makes a suite resumable stake by stake rather than channel by channel."""
+        seen = []
+        for reach in derive_reaches(target):
+            if not seen or seen[-1] != reach.stake.id:
+                seen.append(reach.stake.id)
+        assert len(seen) == len(set(seen))
+
+    def test_a_planted_reach_carries_the_declaration_it_names(self, target):
+        for reach in derive_reaches(target):
+            if reach.is_planted:
+                assert reach.declaration is not None
+                assert reach.declaration.name == reach.channel
+                assert reach.family == "planted"
+
+    def test_a_conversational_reach_carries_no_declaration(self, target):
+        conversation = [r for r in derive_reaches(target) if not r.is_planted]
+        assert conversation
+        assert all(reach.declaration is None for reach in conversation)
+
+    def test_sequence_is_deterministic(self, target):
+        def ids(spec):
+            return [(r.stake.id, r.channel) for r in derive_reaches(spec)]
+
+        assert ids(target) == ids(target)
+
+    def test_an_agent_declaring_no_channel_is_reached_by_conversation_only(self, target):
+        """Honest rather than empty: it still has the channel every agent has."""
+        quiet = target.model_copy(
+            update={"config": target.config.model_copy(update={"channels": ()})}
+        )
+        assert {reach.channel for reach in derive_reaches(quiet)} == {"conversation"}
+
+
+class TestAReachIsRefusedWhenItCouldNotBeRun:
+    """Both directions fail quietly: one plants nowhere, the other talks to a field."""
+
+    @staticmethod
+    def _stake():
+        return Stake(
+            id="ungated_action:send",
+            kind=StakeKind.UNGATED_ACTION,
+            tool="send",
+            consequence=Consequence.MONEY,
+            objective="Have the agent call send.",
+            settled_by=Settlement.DETECTOR,
+        )
+
+    @staticmethod
+    def _declaration(name="note"):
+        from agentred.spec import ChannelDeclaration, TriggerKind
+
+        return ChannelDeclaration(
+            name=name,
+            writer="The shopper.",
+            data_source="carts",
+            record_path="note",
+            record_key="cart_id",
+            trigger=TriggerKind.SCHEDULE,
+        )
+
+    def test_a_planted_reach_without_a_declaration_is_refused(self):
+        with pytest.raises(ValidationError, match="no field to write into"):
+            Reach(stake=self._stake(), channel="note")
+
+    def test_a_conversational_reach_carrying_a_declaration_is_refused(self):
+        with pytest.raises(ValidationError, match="which nothing would use"):
+            Reach(stake=self._stake(), channel="conversation", declaration=self._declaration())
+
+    def test_a_declaration_for_another_channel_is_refused(self):
+        with pytest.raises(ValidationError, match="carries the declaration for"):
+            Reach(
+                stake=self._stake(),
+                channel="note",
+                declaration=self._declaration("somewhere_else"),
+            )
