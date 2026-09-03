@@ -54,6 +54,8 @@ from agentred.runner.suite import (
     to_json,
 )
 from agentred.scoring.analysis import AnalysisError, analyse, known_runs, resolve_runs
+from agentred.scoring.cost import build_report
+from agentred.scoring.cost import render as render_cost
 from agentred.scoring.render import build
 from agentred.spec import SpecError, load_spec_dir
 from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec
@@ -336,6 +338,105 @@ def _read_instructions(spec: AgentSpec, model: str) -> Inference:
 
 
 @app.command()
+def cost(
+    run: Annotated[
+        Path, typer.Option("--run", help="A run directory holding run.json and calls.jsonl.")
+    ],
+    store_path: Annotated[Path, typer.Option("--store")] = DEFAULT_STORE,
+) -> None:
+    """Price a finished run. Reads the recording and the stored turns, calls nothing.
+
+    Reported separately for the harness and the target, because the two halves are recorded
+    in different places and a figure that reads only the recording is roughly half the bill.
+    Says whether it is a bill or an estimate, and counts what it could not price.
+    """
+    manifest = run / "run.json"
+    if not manifest.exists():
+        typer.echo(f"no run.json in {run}")
+        raise typer.Exit(code=1)
+    described = json.loads(manifest.read_text(encoding="utf-8"))
+    target = str(described.get("target") or "")
+    run_id = str(described.get("run_id") or "")
+    try:
+        spec = load_spec_dir(load_registry().resolve(target).spec_dir)
+    except (SpecError, ConsentError) as error:
+        typer.echo(f"cannot resolve target {target!r}: {error}")
+        raise typer.Exit(code=1) from error
+    _report_cost(
+        directory=run,
+        spec=spec,
+        run_id=run_id,
+        store_path=store_path if run_id else None,
+        attacks=len(described.get("outcomes") or ()),
+    )
+    typer.echo(f"cost.json   {run / 'cost.json'}")
+
+
+def _report_cost(
+    *,
+    directory: Path,
+    spec: AgentSpec,
+    run_id: str,
+    store_path: Path | None,
+    attacks: int,
+) -> None:
+    """Price a finished run from its recording and its stored turns, and write it down.
+
+    Called on the way out of a run, including an interrupted one, and never allowed to be
+    the reason a run fails: a report that raises after the money is spent loses the only
+    account of what it was spent on. A failure prints what went wrong instead.
+
+    Args:
+        directory: The run directory. `cost.json` is written here beside `run.json`.
+        spec: The target's spec, for the model the target declares.
+        run_id: The stored run, or empty when nothing was persisted.
+        store_path: The database, or `None`.
+        attacks: How many conversations ran, for the per-attack average.
+    """
+    try:
+        report = build_report(
+            recording=directory / "calls.jsonl",
+            route=resolve_route(),
+            store_path=store_path if run_id else None,
+            run_id=run_id,
+            target_model=spec.config.model,
+        )
+    except (OSError, ValueError, LLMConfigurationError) as error:
+        typer.echo(f"cost        not computed: {type(error).__name__}: {error}")
+        return
+    typer.echo(render_cost(report, attacks=attacks))
+    typer.echo("")
+    (directory / "cost.json").write_text(
+        json.dumps(
+            {
+                "total_usd": round(report.total_usd, 6),
+                "rate_source": report.rate_source,
+                "harness_usd": round(report.side_usd("harness"), 6),
+                "target_usd": round(report.side_usd("target"), 6),
+                "turns_without_usage": report.turns_without_usage,
+                "failed_calls": report.failed_calls,
+                "unpriced_models": sorted(tally.model for tally in report.unpriced),
+                "by_model": [
+                    {
+                        "side": tally.side,
+                        "model": tally.model,
+                        "calls": tally.calls,
+                        "tokens": tally.tokens,
+                        "usd": None if tally.usd is None else round(tally.usd, 6),
+                    }
+                    for tally in report.tallies.values()
+                ],
+                "per_attack_usd": {
+                    attack: round(usd, 6) for attack, usd in sorted(report.per_attack.items())
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+@app.command()
 def run(
     target: Annotated[str, typer.Option("--target", help="Registered target name.")],
     stake: Annotated[
@@ -454,6 +555,16 @@ def run(
     persist(completed, store_path)
     (directory / "run.json").write_text(json.dumps(to_json(completed), indent=2), encoding="utf-8")
     typer.echo(summarise(completed))
+    # Before anything that can raise, and on the interrupted path too. The target's half of
+    # the bill is reported once per turn and is only in the store; a run whose cost is read
+    # later is fine, but a run whose cost is never read has spent money nobody counted.
+    _report_cost(
+        directory=directory,
+        spec=spec,
+        run_id=completed.run_id,
+        store_path=store_path,
+        attacks=len(completed.outcomes),
+    )
     if interrupted is not None:
         typer.echo("")
         typer.echo(

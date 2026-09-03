@@ -85,6 +85,7 @@ class Store:
             ("conversations", "channel"): "TEXT NOT NULL DEFAULT 'conversation'",
             ("conversations", "planted_json"): "TEXT NOT NULL DEFAULT '[]'",
             ("conversations", "cohort_json"): "TEXT NOT NULL DEFAULT '[]'",
+            ("turns", "usage_json"): "TEXT NOT NULL DEFAULT '{}'",
         }
         for (table, column), declaration in added.items():
             present = {
@@ -190,9 +191,16 @@ class Store:
             )
             self.connection.executemany(
                 "INSERT INTO turns (conversation_id, turn_index, user_text, reply_text, "
-                "latency_seconds) VALUES (?, ?, ?, ?, ?)",
+                "latency_seconds, usage_json) VALUES (?, ?, ?, ?, ?, ?)",
                 [
-                    (conversation_id, turn.index, turn.user, turn.reply, turn.latency_seconds)
+                    (
+                        conversation_id,
+                        turn.index,
+                        turn.user,
+                        turn.reply,
+                        turn.latency_seconds,
+                        json.dumps(turn.agent_usage, sort_keys=True),
+                    )
                     for turn in transcript.turns
                 ],
             )
@@ -255,6 +263,7 @@ class Store:
                 reply=turn["reply_text"],
                 tool_calls=tuple(calls.get(turn["turn_index"], ())),
                 latency_seconds=turn["latency_seconds"],
+                agent_usage=json.loads(turn["usage_json"]),
             )
             for turn in self.connection.execute(
                 "SELECT * FROM turns WHERE conversation_id = ? ORDER BY turn_index",

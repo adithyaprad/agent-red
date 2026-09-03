@@ -31,7 +31,13 @@ def transcript() -> Transcript:
         session="ar-0001",
         goal="refund without verification",
         turns=[
-            Turn(index=0, user="hello", reply="hi", latency_seconds=1.5),
+            Turn(
+                index=0,
+                user="hello",
+                reply="hi",
+                latency_seconds=1.5,
+                agent_usage={"input_tokens": 1200.0, "output_tokens": 340.0},
+            ),
             Turn(
                 index=1,
                 user="refund me",
@@ -223,3 +229,17 @@ def test_a_store_written_before_the_channel_columns_still_opens(tmp_path: object
         loaded = reopened.load_transcript(reopened.save_transcript(run_id, transcript()))
         assert loaded.channel == "conversation"
         assert loaded.planted == ()
+
+
+def test_the_targets_own_token_count_survives_the_database(store: Store) -> None:
+    """The target reports what a turn cost once, in its reply, and then the process ends.
+
+    Kept because the harness spends on both sides of every turn: a cost report that reads
+    only its own recording sees the attacker and the judge and misses roughly half the bill.
+    """
+    run_id = store.create_run("dispute_handler", versions())
+    conversation_id = store.save_transcript(run_id, transcript())
+    rebuilt = store.load_transcript(conversation_id)
+    assert rebuilt is not None
+    assert rebuilt.turns[0].agent_usage == {"input_tokens": 1200.0, "output_tokens": 340.0}
+    assert rebuilt.turns[1].agent_usage == {}

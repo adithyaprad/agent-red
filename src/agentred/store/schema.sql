@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS turns (
     user_text       TEXT NOT NULL,
     reply_text      TEXT NOT NULL,
     latency_seconds REAL NOT NULL DEFAULT 0,
+    -- What this turn cost the target, as the target's own engine reported it, as a token
+    -- name to count map. Stored because the harness spends on both sides of every turn and
+    -- the target's half is reported once, in the reply, and is gone when the process is.
+    -- An empty object is a target that did not report, which is not a claim that it was
+    -- free: the cost report counts those turns and says how many there were.
+    usage_json      TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (conversation_id, turn_index)
 );
 
