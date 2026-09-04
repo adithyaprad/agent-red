@@ -1,0 +1,19 @@
+# What one operator configured, as a no-code builder stores it. The skill is the same for
+# everyone who installs it; these values are what makes this instance theirs.
+instance_id: dispute_handler
+skill: dispute-responder
+limits:
+  - action: issue_refund
+    field: amount
+    max: 50000
+    min: 0
+    label: Anything above fifty thousand rupees goes to a human.
+  - action: apply_discount
+    field: percent
+    max: 10
+    min: 0
+    label: A goodwill adjustment is a gesture, not a settlement.
+data_access:
+  sources: [disputes, orders, customers, shipments]
+  identifiers: [dispute_id, order_id, email]
+  label: One conversation covers one dispute, the order behind it and that customer.

@@ -1,0 +1,11 @@
+# An agent as a builder installs it: the connectors it reaches, the limits its operator
+# configured, the prose it runs on, and the workflow the installer mapped it onto. Nobody
+# wrote a declaration for agent-red. Every path below exists because the agent needs it.
+agent_id: dispute_handler
+version: "1.7"
+model: claude-sonnet-5
+connectors:
+  - http://arena/dispute_handler/ingest/s1
+instance: ./instance.yaml
+instructions: ./skill.md
+workflow: tests.ingest.installed.flow:build

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 
 from agentred.attacks.generator import build_suite
 from agentred.attacks.infer_policy import Inference, InferenceError, infer_policy
@@ -767,3 +768,74 @@ def report(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def read(
+    manifest: Annotated[
+        Path, typer.Option("--manifest", help="Path to an installed agent's manifest.")
+    ],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Directory to write config.yaml and policy.yaml into."),
+    ] = None,
+) -> None:
+    """Recover an agent's declaration from the sources its own platform already carries.
+
+    Reads the connectors, instance configuration, prose and workflow the manifest names, and
+    reports what came back, what nobody looked at, and what nothing answered. Writing is
+    refused while any question is unanswered, because a declaration emitted over a hole is a
+    guess reported as a fact and every finding downstream inherits it.
+
+    Args:
+        manifest: The installed agent to read.
+        out: Where to write the declaration. Omitted, nothing is written and the report is
+            still printed, which is the mode for finding out what an integration would need.
+
+    Raises:
+        typer.Exit: If the manifest or one of the sources it names cannot be read, or if a
+            declaration was asked for and questions remain.
+    """
+    import asyncio
+
+    from agentred.ingest.emit import EmitError, to_spec
+    from agentred.ingest.read import ManifestError, load_manifest
+    from agentred.ingest.read import read_agent as read_sources
+
+    try:
+        found = load_manifest(manifest)
+        package = asyncio.run(read_sources(found))
+    except ManifestError as error:
+        typer.echo(str(error))
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"agent-red read {found.agent_id}")
+    typer.echo(f"  sources read: {', '.join(package.sources) or 'none'}")
+    typer.echo(f"  {len(package.tools)} tools, {len(package.rules)} rules")
+    for subject, question in package.unresolved:
+        typer.echo(f"  unanswered: {subject}: {question}")
+    for note in package.notes:
+        typer.echo(f"  not expressible from the sources read: {note}")
+
+    if out is None:
+        return
+    try:
+        emission, spec = to_spec(package, version=found.version, model=found.model)
+    except EmitError as error:
+        typer.echo(str(error))
+        raise typer.Exit(code=1) from error
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "config.yaml").write_text(
+        yaml.safe_dump(emission.config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+    )
+    written = ["config.yaml"]
+    if emission.policy is not None:
+        (out / "policy.yaml").write_text(
+            yaml.safe_dump(emission.policy.model_dump(mode="json"), sort_keys=False),
+            encoding="utf-8",
+        )
+        written.append("policy.yaml")
+    typer.echo(f"  wrote {', '.join(written)} to {out}")
+    if spec is None:
+        typer.echo("  no policy was recovered, so this declares a surface and bounds nothing")
