@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
-from agentred.cli import app
+from agentred.cli import (
+    _load_deployment,
+    _load_subjects,
+    _stated_consequences,
+    _with_behaviours,
+    app,
+)
+from agentred.ingest.package import AgentPackage
+from agentred.spec.models import Consequence
 
 runner = CliRunner()
 REGISTRY = Path(__file__).resolve().parents[1] / "targets.registry.yaml"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "retention_desk"
 
 
 def run(*arguments: str, env: dict[str, str] | None = None) -> object:
@@ -144,3 +154,56 @@ class TestTheWorldCommand:
         written = json.loads(out.read_text())
         assert written["collections"]["disputes"]
         assert written["fixtures"][0]["rule"]
+
+
+def test_read_refuses_an_answers_file_with_no_consequences(tmp_path: Path) -> None:
+    path = tmp_path / "answers.yaml"
+    path.write_text("answered_by: fde\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no consequences block"):
+        _stated_consequences(path)
+
+
+def test_read_refuses_a_consequence_that_is_not_one_of_the_four(tmp_path: Path) -> None:
+    path = tmp_path / "answers.yaml"
+    path.write_text("consequences:\n  get_subscription: expensive\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not one of"):
+        _stated_consequences(path)
+
+
+def test_the_shipped_answers_cover_what_the_example_advertises(tmp_path: Path) -> None:
+    stated = _stated_consequences(EXAMPLE / "answers.yaml")
+
+    assert stated["refund_charge"] is Consequence.MONEY
+    assert stated["get_subscription"] is Consequence.DISCLOSURE
+
+
+def test_read_refuses_a_deployment_file_that_confirms_nothing(tmp_path: Path) -> None:
+    path = tmp_path / "deployment.yaml"
+    path.write_text("behaviours: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="none of behaviours, channels or presentation"):
+        _load_deployment(path)
+
+
+def test_read_refuses_a_subjects_file_with_no_subjects(tmp_path: Path) -> None:
+    path = tmp_path / "subjects.yaml"
+    path.write_text("subjects: []\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no subjects block"):
+        _load_subjects(path)
+
+
+def test_the_shipped_subjects_load(tmp_path: Path) -> None:
+    acting = _load_subjects(EXAMPLE / "subjects.yaml")
+
+    assert len(acting) == 6
+    assert all(subject.identifiers.get("subscription_id") for subject in acting)
+
+
+def test_a_behaviour_for_a_tool_nobody_advertised_is_refused() -> None:
+    package = AgentPackage(agent_id="an_agent")
+
+    with pytest.raises(ValueError, match="do not advertise"):
+        _with_behaviours(package, {"refund_charge": {"shape": "write"}})

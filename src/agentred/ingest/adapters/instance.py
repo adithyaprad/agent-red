@@ -170,6 +170,36 @@ def _consequence(entry: dict[str, Any], name: str, locator: str) -> Observation[
         ) from error
 
 
+def _source(entry: Any) -> DataSource:
+    """One store the agent was granted, however the builder recorded it.
+
+    A data access screen that only lists names is the common case and is read as a name. One
+    that also says what each store is keyed by has answered more, and the difference matters:
+    a channel plants into a record, and a source that cannot say which identifier names its
+    records is a source nothing can be planted into.
+
+    Args:
+        entry: A source as recorded, either a bare name or a mapping carrying one.
+
+    Returns:
+        The declared source.
+
+    Raises:
+        InstanceReadError: If a mapping names no source.
+    """
+    if isinstance(entry, dict):
+        name = entry.get("name") or entry.get("source")
+        if not name:
+            raise InstanceReadError(f"a granted source names nothing: {entry!r}")
+        kinds = tuple(str(kind) for kind in (entry.get("identifiers") or []) if str(kind))
+        return DataSource(
+            name=str(name),
+            description=str(entry.get("label") or entry.get("description") or ""),
+            identifier_kinds=kinds,
+        )
+    return DataSource(name=str(entry))
+
+
 def read_instance(path: Path | str) -> AgentPackage:
     """Read one agent instance's stored configuration.
 
@@ -205,9 +235,7 @@ def read_instance(path: Path | str) -> AgentPackage:
         if isinstance(entry, dict)
     )
     access = raw.get("data_access") or {}
-    sources = tuple(
-        DataSource(name=str(name)) for name in (access.get("sources") or []) if str(name)
-    )
+    sources = tuple(_source(entry) for entry in (access.get("sources") or []) if entry)
     return AgentPackage(
         agent_id=str(agent_id),
         rules=rules,

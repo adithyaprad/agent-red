@@ -25,7 +25,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -60,7 +60,7 @@ from agentred.scoring.cost import build_report
 from agentred.scoring.cost import render as render_cost
 from agentred.scoring.render import build
 from agentred.spec import SpecError, load_spec_dir
-from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec, Subject
+from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec, Consequence, Subject
 from agentred.store.repo import Store
 
 DEFAULT_STORE = Path("data/agentred.db")
@@ -766,11 +766,165 @@ def report(
     typer.echo(f"report  {out}")
 
 
+def _load_deployment(path: Path) -> dict[str, Any]:
+    """Read what an operator confirms after a read.
+
+    Args:
+        path: YAML holding any of `behaviours`, `channels` and `presentation`.
+
+    Returns:
+        The mapping as written.
+
+    Raises:
+        ValueError: If the file is not a mapping, or holds none of the three blocks. A file
+            supplied and empty is a step somebody meant to do, and treating it as nothing
+            confirmed would let a shop be generated over a tool surface nobody described.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: not a YAML mapping")
+    if not any(raw.get(block) for block in ("behaviours", "channels", "presentation")):
+        raise ValueError(f"{path}: holds none of behaviours, channels or presentation")
+    return raw
+
+
+def _with_behaviours(package: Any, behaviours: dict[str, Any]) -> Any:
+    """Attach what each tool does to the records, as an operator described it.
+
+    Args:
+        package: What the readers recovered.
+        behaviours: One entry per tool, keyed by tool name.
+
+    Returns:
+        The package with those behaviours on its tools.
+
+    Raises:
+        ValueError: If a behaviour names a tool the connectors do not advertise. Silence
+            would leave a tool served with no handler and a run reading as an agent that
+            could not be talked into anything.
+    """
+    from dataclasses import replace as _replace
+
+    from agentred.spec.models import ToolBehaviour
+
+    if not behaviours:
+        return package
+    advertised = {tool.name for tool in package.tools}
+    if extra := sorted(set(behaviours) - advertised):
+        raise ValueError(
+            f"describes {', '.join(extra)}, which this agent's connectors do not advertise"
+        )
+    described = {
+        name: ToolBehaviour.model_validate(body) for name, body in behaviours.items() if body
+    }
+    return _replace(
+        package,
+        tools=tuple(
+            _replace(tool, behaviour=described[tool.name]) if tool.name in described else tool
+            for tool in package.tools
+        ),
+    )
+
+
+def _deployment_fields(overlay: dict[str, Any]) -> dict[str, Any]:
+    """The config fields an operator confirms, ready to render.
+
+    Args:
+        overlay: The deployment mapping, possibly empty.
+
+    Returns:
+        Only the keys the operator actually supplied, so an absent block leaves the emitted
+        config's own default rather than overwriting it with one.
+    """
+    fields: dict[str, Any] = {}
+    if channels := overlay.get("channels"):
+        fields["channels"] = channels
+    for name, value in (overlay.get("presentation") or {}).items():
+        fields[str(name)] = value
+    return fields
+
+
+def _load_subjects(path: Path) -> tuple[Subject, ...]:
+    """Read the identities the harness may act as.
+
+    Args:
+        path: YAML holding a `subjects` list, the same shape the spec loader reads.
+
+    Returns:
+        The subjects, in file order.
+
+    Raises:
+        ValueError: If the file is not a mapping, holds no subjects, or one of them does not
+            validate.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("not a YAML mapping")
+    listed = raw.get("subjects")
+    if not isinstance(listed, list) or not listed:
+        raise ValueError(f"{path}: no subjects block")
+    try:
+        return tuple(Subject.model_validate(entry) for entry in listed)
+    except Exception as error:
+        raise ValueError(str(error)) from error
+
+
+def _stated_consequences(path: Path) -> dict[str, Consequence]:
+    """What an operator said each tool costs, read before any connector is contacted.
+
+    Read up front rather than at the point of use, so a malformed answers file is reported in
+    the second it takes to parse rather than after a connector has been listed. The names are
+    not checked against the agent here: only the package knows what was actually advertised,
+    and it refuses a mismatch in both directions.
+
+    Args:
+        path: YAML holding `consequences`, one entry per advertised tool.
+
+    Returns:
+        The consequence each named tool was given.
+
+    Raises:
+        ValueError: If the file is not a mapping, carries no consequences, or names a value
+            that is not one of the four.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: not a YAML mapping")
+    stated = raw.get("consequences")
+    if not isinstance(stated, dict) or not stated:
+        raise ValueError(
+            f"{path}: no consequences block. Every read asks what a wrong call to each tool "
+            f"costs, because no connector protocol carries it."
+        )
+    consequences: dict[str, Consequence] = {}
+    for name, value in stated.items():
+        try:
+            consequences[str(name)] = Consequence(str(value))
+        except ValueError as error:
+            allowed = ", ".join(item.value for item in Consequence)
+            raise ValueError(
+                f"{path}: {name} is recorded as {value!r}, which is not one of {allowed}"
+            ) from error
+    return consequences
+
+
 @app.command()
 def read(
     manifest: Annotated[
         Path, typer.Option("--manifest", help="Path to an installed agent's manifest.")
     ],
+    answers: Annotated[
+        Path | None,
+        typer.Option("--answers", help="YAML holding an operator's answers to what a read asks."),
+    ] = None,
+    subjects: Annotated[
+        Path | None,
+        typer.Option("--subjects", help="YAML holding the identities the harness may act as."),
+    ] = None,
+    deployment: Annotated[
+        Path | None,
+        typer.Option("--deployment", help="YAML holding what a read says no reader supplies."),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option("--out", help="Directory to write config.yaml and policy.yaml into."),
@@ -785,6 +939,18 @@ def read(
 
     Args:
         manifest: The installed agent to read.
+        answers: An operator's answers to the questions the read raises, as
+            `consequences: {tool: money|obligation|disclosure|inert}`. Supplied rather than
+            prompted for so that a run reproduces and so the answers are reviewable beside
+            the declaration they produced.
+        deployment: What a read reports that no reader covers: what each tool does to the
+            merchant's records, the fields an adversary writes and what makes the agent read
+            them, and how amounts are shown. All properties of one deployment rather than of
+            the platform's records, so they are confirmed by an operator rather than guessed.
+        subjects: Identities the harness may act as, in the `subjects.yaml` layout. Not
+            recovered and not recoverable: a platform has no reason to record who a red team
+            may impersonate, and a policy that scopes a session by identifier is refused
+            without them. Copied into the output directory alongside the declaration.
         out: Where to write the declaration. Omitted, nothing is written and the report is
             still printed, which is the mode for finding out what an integration would need.
 
@@ -798,10 +964,33 @@ def read(
     from agentred.ingest.read import ManifestError, load_manifest
     from agentred.ingest.read import read_agent as read_sources
 
+    stated: dict[str, Any] = {}
+    overlay: dict[str, Any] = {}
+    acting: tuple[Subject, ...] = ()
+    try:
+        if answers is not None:
+            stated = _stated_consequences(answers)
+        if deployment is not None:
+            overlay = _load_deployment(deployment)
+        if subjects is not None:
+            acting = _load_subjects(subjects)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        typer.echo(str(error))
+        raise typer.Exit(code=1) from error
+
     try:
         found = load_manifest(manifest)
         package = asyncio.run(read_sources(found))
     except ManifestError as error:
+        typer.echo(str(error))
+        raise typer.Exit(code=1) from error
+
+    try:
+        if stated:
+            package = package.answered(stated, by=str(answers))
+        if overlay:
+            package = _with_behaviours(package, overlay.get("behaviours") or {})
+    except ValueError as error:
         typer.echo(str(error))
         raise typer.Exit(code=1) from error
 
@@ -816,16 +1005,25 @@ def read(
     if out is None:
         return
     try:
-        emission, spec = to_spec(package, version=found.version, model=found.model)
+        emission, spec = to_spec(package, version=found.version, model=found.model, subjects=acting)
     except EmitError as error:
         typer.echo(str(error))
         raise typer.Exit(code=1) from error
 
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.yaml").write_text(
-        yaml.safe_dump(emission.config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
-    )
+    rendered = emission.config.model_dump(mode="json")
+    rendered.update(_deployment_fields(overlay))
+    (out / "config.yaml").write_text(yaml.safe_dump(rendered, sort_keys=False), encoding="utf-8")
     written = ["config.yaml"]
+    if acting:
+        (out / "subjects.yaml").write_text(
+            yaml.safe_dump(
+                {"subjects": [subject.model_dump(mode="json") for subject in acting]},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        written.append("subjects.yaml")
     if emission.policy is not None:
         (out / "policy.yaml").write_text(
             yaml.safe_dump(emission.policy.model_dump(mode="json"), sort_keys=False),

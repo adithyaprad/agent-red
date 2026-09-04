@@ -113,6 +113,7 @@ def to_config(
             description=facts.description,
             parameters=dict(facts.parameters),
             consequence=facts.consequence.require(),
+            behaviour=facts.behaviour,
         )
         for facts in package.tools
     )
@@ -160,6 +161,10 @@ def _unreadable(package: AgentPackage) -> tuple[str, ...]:
     if not package.rules:
         missing.append("policy: read from an instance configuration and a workflow definition")
     missing.append("channels and trigger: read from a manifest, and confirmed by an operator")
+    missing.append(
+        "tool behaviours: what each tool does to the merchant's records, which no connector "
+        "protocol carries and which a shop cannot be generated without"
+    )
     missing.append("subjects: supplied by the harness, never recovered from a platform")
     return tuple(missing)
 

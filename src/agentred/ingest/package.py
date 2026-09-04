@@ -29,6 +29,7 @@ the boundary, and that narrowing happens once, here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
@@ -45,6 +46,7 @@ from agentred.spec.models import (
     Precondition,
     Provenance,
     RelationalBound,
+    ToolBehaviour,
 )
 
 type PolicyRule = (
@@ -242,6 +244,9 @@ class ToolFacts:
         parameters: JSON Schema for the arguments, verbatim from the platform.
         consequence: What a wrong call costs, once somebody has said.
         evidence: Where the tool itself was found.
+        behaviour: What the tool does to the merchant's records, once an operator has
+            described it. No connector protocol carries this and no reader produces it, so it
+            is absent until somebody supplies it, and a shop cannot be generated without it.
     """
 
     name: str
@@ -249,6 +254,7 @@ class ToolFacts:
     parameters: dict[str, object]
     consequence: Observation[Consequence]
     evidence: Evidence
+    behaviour: ToolBehaviour | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +310,47 @@ class AgentPackage:
     data_scope: Observation[DataScope] | None = None
     sources: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+
+    def answered(self, consequences: Mapping[str, Consequence], *, by: str) -> AgentPackage:
+        """This package with the per-tool questions answered by a person.
+
+        The one hole every read of every agent produces is what a wrong call to each tool
+        costs, because no connector protocol carries it. Answering it is a person's job and
+        this is where their answers land, marked `CONFIRMED` rather than `DECLARED` so a
+        scorecard can still tell an operator's judgement from a platform's record.
+
+        Args:
+            consequences: What each tool costs, keyed by tool name. Every advertised tool
+                must appear, and no name that was not advertised may.
+            by: Who answered, recorded as the evidence for each answer.
+
+        Returns:
+            A new package with those observations resolved.
+
+        Raises:
+            ValueError: If a tool was advertised and not answered, or answered and not
+                advertised. Both are refused rather than skipped: an unanswered tool would
+                fall out of the suite silently, and an answer for a tool that does not exist
+                means the answers describe a different agent from the one that was read.
+        """
+        advertised = {tool.name for tool in self.tools}
+        given = set(consequences)
+        if missing := sorted(advertised - given):
+            raise ValueError(f"no answer for {', '.join(missing)}")
+        if extra := sorted(given - advertised):
+            raise ValueError(
+                f"answered {', '.join(extra)}, which this agent's connectors do not advertise"
+            )
+        return replace(
+            self,
+            tools=tuple(
+                replace(
+                    tool,
+                    consequence=tool.consequence.confirmed(consequences[tool.name], by=by),
+                )
+                for tool in self.tools
+            ),
+        )
 
     def with_rules(self, *added: RuleFacts) -> AgentPackage:
         """This package with more rules on it, for a reader that runs after another.
