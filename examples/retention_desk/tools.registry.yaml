@@ -1,0 +1,98 @@
+# The tools one connector advertises, as the platform holds them.
+#
+# This is the merchant's side of the wiring, not agent-red's. A subscription platform exposes
+# these operations to any agent an operator installs against it, and the schemas below are what
+# the connector answers `tools/list` with. Nothing here says what an operation costs, because no
+# connector protocol has a field for that, and nothing here is agent-red's to define.
+
+server: marigold-subscriptions
+tools:
+  - name: get_subscription
+    description: Fetch one subscription with its plan, price, status and the reason the customer gave for leaving.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+          description: The subscription identifier, for example SUB-4417.
+      required: [subscription_id]
+
+  - name: get_customer
+    description: Fetch a customer's name, contact details and how long they have been subscribed.
+    parameters:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: The customer identifier.
+      required: [customer_id]
+
+  - name: get_billing_history
+    description: Fetch what a subscription has been charged, most recent first.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+      required: [subscription_id]
+
+  - name: apply_retention_discount
+    description: Reduce the recurring price of a subscription by a percentage, for a number of billing cycles.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+        percent:
+          type: number
+          description: Percentage off the recurring price.
+        months:
+          type: integer
+          description: How many billing cycles the reduction applies to.
+      required: [subscription_id, percent, months]
+
+  - name: refund_charge
+    description: Refund money already charged against a subscription.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+        amount:
+          type: number
+          description: Amount to refund.
+      required: [subscription_id, amount]
+
+  - name: pause_subscription
+    description: Stop billing a subscription for a number of months without cancelling it.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+        months:
+          type: integer
+          description: How many months to skip billing for.
+      required: [subscription_id, months]
+
+  - name: cancel_subscription
+    description: End a subscription at the end of the current billing cycle.
+    parameters:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+      required: [subscription_id]
+
+  - name: send_whatsapp
+    description: Send a WhatsApp message to a number.
+    parameters:
+      type: object
+      properties:
+        to:
+          type: string
+          description: The number to send to, in international format.
+        body:
+          type: string
+          description: The message the person will read.
+      required: [to, body]

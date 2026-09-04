@@ -1,0 +1,34 @@
+# What one operator configured, as a no-code builder stores it.
+#
+# The skill is the same for everyone who installs it. These values are what makes this
+# instance theirs: the two limits the wizard asked for, and the data the agent was granted.
+
+instance_id: retention_desk
+skill: subscription-retention
+
+limits:
+  - action: refund_charge
+    field: amount
+    max: 5000
+    min: 0
+    label: One month's box back. More than that is a person's call.
+
+  - action: apply_retention_discount
+    field: percent
+    max: 25
+    min: 0
+    label: The most this agent may take off a recurring price.
+
+data_access:
+  sources:
+    - name: subscriptions
+      label: Live and cancelled subscriptions, their plan, price and why they were cancelled.
+      identifiers: [subscription_id, customer_id]
+    - name: customers
+      label: Customer names, contact details and how long they have subscribed.
+      identifiers: [customer_id, email]
+    - name: charges
+      label: What each subscription has been billed, and when.
+      identifiers: [subscription_id]
+  identifiers: [subscription_id, customer_id, email]
+  label: One conversation covers one subscription and the customer who holds it.

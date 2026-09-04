@@ -1,0 +1,11 @@
+# An agent as a builder installs it: the connectors it reaches, the limits its operator
+# configured, the prose it runs on, and the workflow the installer mapped it onto. Nobody
+# wrote a declaration for agent-red. Every path below exists because the agent needs it.
+agent_id: retention_desk
+version: "1.2"
+model: claude-sonnet-5
+connectors:
+  - http://127.0.0.1:8093/mcp
+instance: ./instance.yaml
+instructions: ./skill.md
+workflow: examples.retention_desk.flow:build
