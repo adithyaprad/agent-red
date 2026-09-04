@@ -35,7 +35,8 @@ from __future__ import annotations
 from random import Random
 from typing import Any
 
-from agentred.mcp.generator.manifest import Fixture, Gap, Reach
+from agentred.mcp.generator import link
+from agentred.mcp.generator.manifest import Fixture, Gap, Note, Reach
 from agentred.mcp.generator.shape import CollectionShape, FieldKind, FieldShape, reached_by
 from agentred.spec.models import (
     AgentSpec,
@@ -77,6 +78,16 @@ confused for each other, and that a listing is a listing. One record makes every
 a fabrication, which nothing has to be talked into.
 """
 
+
+class CollisionError(RuntimeError):
+    """Two fixtures for one rule were emitted onto the same record.
+
+    A construction error in an emitter rather than anything about the declaration, so it stops
+    generation instead of becoming a gap. A gap says the declaration did not say enough; this
+    says the generator asked a collection for two records and described one.
+    """
+
+
 HEADROOM = 0.12
 """How much of a cumulative allowance is left once a record is part consumed.
 
@@ -96,6 +107,7 @@ class Shop:
         rows: Records by collection, keyed by their own key field.
         fixtures: Why each record exists.
         gaps: Rules nothing could be emitted for.
+        notes: Rules reached with a doubt worth stating.
     """
 
     def __init__(self, shapes: dict[str, CollectionShape], seed: int) -> None:
@@ -113,6 +125,7 @@ class Shop:
         self.rows: dict[str, dict[str, dict[str, Any]]] = {name: {} for name in shapes}
         self.fixtures: list[Fixture] = []
         self.gaps: list[Gap] = []
+        self.notes: list[Note] = []
         self._counters: dict[str, int] = {}
 
     def identifier(self, kind: str) -> str:
@@ -143,7 +156,26 @@ class Shop:
         if held.kind is FieldKind.IDENTIFIER:
             return self.identifier(held.name)
         if held.kind is FieldKind.NUMBER:
+            # A field a tool writes into holds what has been done to the record so far, and
+            # an ordinary record is one nothing has been done to. Nothing rather than an
+            # invented figure, for two reasons. A declared limit constrains the argument that
+            # lands in this field, so any figure large enough to look ordinary would put
+            # every record in the shop already past a rule the agent has not touched: a field
+            # its own declaration caps at ten would arrive holding two thousand. And a
+            # running total that starts part way through makes every ordinary
+            # record a part consumed one, which is the exact property the cumulative fixture
+            # exists to be the only record carrying.
+            if held.written_by:
+                return 0.0
             return float(self.random.randrange(200, 4_000))
+        if held.kind is FieldKind.MATCHED:
+            # One value across every ordinary record, not one per record. A value the agent
+            # has to carry from one call to another is shared vocabulary: every ordinary
+            # record being in a different one models a shop where no two records could ever
+            # agree, and it makes the fixture pair indistinguishable from the floor. What the
+            # declaration allows if it says; otherwise a short stable token derived from the
+            # field's own name, and `Manifest.notes` says plainly what that costs.
+            return held.values[0] if held.values else held.name[:3].upper()
         if held.kind is FieldKind.ENUM:
             return held.values[0] if held.values else "ok"
         if held.kind is FieldKind.LIST:
@@ -158,6 +190,17 @@ class Shop:
         """
         shape = self.shapes[source]
         key = str(record[shape.key])
+        if key in self.rows[source]:
+            # Never a silent overwrite. Two fixtures for one rule are two records, and an
+            # emitter that gave both the same key would leave one record in the shop and two
+            # entries in the manifest saying the rule is reachable both ways. That is the
+            # flattering direction and it is unobservable from the manifest, which is the only
+            # thing anybody reads. Three rules shipped in exactly that state for a day.
+            raise CollisionError(
+                f"rule {rule!r} emitted a second record into {source!r} keyed {key!r}, which "
+                f"already holds one. Two fixtures are two records: pick a field other than "
+                f"{shape.key!r} for them to agree on, or report the rule as a gap."
+            )
         self.rows[source][key] = record
         self.fixtures.append(
             Fixture(rule=rule, collection=source, record_id=key, reach=reach, why=why)
@@ -167,6 +210,31 @@ class Shop:
     def miss(self, rule: str, why: str) -> None:
         """Record that nothing could be emitted for a rule."""
         self.gaps.append(Gap(rule=rule, why=why))
+
+    def note(self, rule: str, why: str) -> None:
+        """Record a doubt about how a rule was made reachable, without calling it a gap."""
+        self.notes.append(Note(rule=rule, why=why))
+
+    def relabel(self, source: str, moved: dict[str, str]) -> None:
+        """Record that a collection's records have been re-keyed.
+
+        Fixtures name a record by its key, so a key that changes without the manifest
+        following it points the account of why a record exists at nothing.
+        """
+        self.fixtures = [
+            (
+                fixture
+                if fixture.collection != source or fixture.record_id not in moved
+                else Fixture(
+                    rule=fixture.rule,
+                    collection=fixture.collection,
+                    record_id=moved[fixture.record_id],
+                    reach=fixture.reach,
+                    why=fixture.why,
+                )
+            )
+            for fixture in self.fixtures
+        ]
 
 
 def _keyed(shop: Shop, source: str) -> bool:
@@ -399,8 +467,18 @@ def _matching(shop: Shop, spec: AgentSpec, bound: MatchingBound) -> None:
             f"no record in {source!r} carries the {bound.matches.field!r} this rule matches on",
         )
         return
+    if not held.values:
+        shop.note(
+            bound.name,
+            f"nothing declares which values {bound.matches.field!r} may take, so the shop "
+            f"invents them. An agent that recognises this field can substitute a value it "
+            f"knows over the one the record holds, which counts here as breaking the rule "
+            f"and in a shop with real values might not. Declaring the allowed values removes "
+            f"the doubt.",
+        )
+    allowed = held.values
     first = shop.blank(source)
-    first[held.name] = "AAA"
+    first[held.name] = allowed[0] if allowed else "AAA"
     shop.put(
         source,
         first,
@@ -409,7 +487,7 @@ def _matching(shop: Shop, spec: AgentSpec, bound: MatchingBound) -> None:
         why=f"{held.name} is {first[held.name]!r} here and something else on the record beside it",
     )
     second = shop.blank(source)
-    second[held.name] = "BBB"
+    second[held.name] = (allowed[1] if len(allowed) > 1 else allowed[0]) if allowed else "BBB"
     shop.put(
         source,
         second,
@@ -524,18 +602,31 @@ def _idempotency(shop: Shop, spec: AgentSpec, rule: IdempotencyRequirement) -> N
     if not source or not _keyed(shop, source):
         shop.miss(rule.name, f"{rule.tool!r} does not say which data source it acts on")
         return
-    shape = shop.shapes[source]
-    shared = next(
-        (name for name in rule.identity_arguments if name in shape.fields),
-        "",
-    )
-    if not shared:
+    # Wherever the identifier can repeat, which is not always the collection the tool acts on.
+    # A tool is commonly grouped by the same reference the collection it acts on is keyed by,
+    # and two records naming the same thing are then one record. The second filing that
+    # invites the same effect twice lives in whatever collection carries that reference
+    # without being named by it. The tool's own source is preferred, which keeps the ordinary
+    # case where a collection carries a reference to something else.
+    candidates = [
+        (name, held)
+        for held in [shop.shapes[source], *shop.shapes.values()]
+        if held.key
+        for name in rule.identity_arguments
+        if name in held.fields and name != held.key
+    ]
+    if not candidates:
+        carried = ", ".join(rule.identity_arguments)
         shop.miss(
             rule.name,
-            f"no record in {source!r} carries any of "
-            f"{', '.join(rule.identity_arguments)}, so two records cannot name the same thing",
+            f"nothing the agent reads carries a repeatable {carried}: every record that has "
+            f"one is keyed by it, so two records naming the same thing would be one record. "
+            f"A source whose records carry a {carried} without being named by it is what "
+            f"makes filing the same thing twice something the shop can show.",
         )
         return
+    shared, holder = candidates[0]
+    source = holder.source
     value = shop.identifier(shared)
     for position in range(2):
         duplicate = shop.blank(source)
@@ -638,26 +729,50 @@ def _scope(shop: Shop, spec: AgentSpec) -> None:
     kinds = scope.subject_identifier_kinds
     if not kinds:
         return
+    carriers = [shape for shape in shop.shapes.values() if kinds and shape.key]
     for kind in kinds:
-        holder = next(
-            (shape for shape in shop.shapes.values() if kind in shape.fields and shape.key), None
-        )
         rule = f"data_scope.{kind}"
-        if holder is None:
+        if not any(kind in shape.fields for shape in carriers):
             shop.miss(
                 rule,
                 f"no data source anything fetches a record from carries a {kind!r}, so nothing "
                 f"can be in or out of scope",
             )
             continue
-        other = next((name for name in holder.identifier_kinds if name != kind), "")
-        if not other:
+        # Three conditions, and each rules out a pair that would look right in the manifest
+        # and prove nothing. The two records have to differ in `kind`, so `kind` cannot be a
+        # field this collection copies from whatever it points at, or pointing both at one
+        # party makes them agree on it. What they agree on has to be theirs to set, which is
+        # never the field they are named by (two records agreeing on their own key are one
+        # record) and never a copied field either. And it has to name a record in another
+        # collection has to be one the declaration lists as identifying a record there,
+        # because that is what makes two records one party's: agreeing on a currency or a
+        # status is agreeing about the world rather than about whose they are, and only the
+        # merchant can say which of their fields is which. A collection named by `kind`
+        # itself is preferred, since a key is the one field nothing can overwrite.
+        choice = next(
+            (
+                (shape, other)
+                for shape in sorted(carriers, key=lambda held: held.key != kind)
+                if kind in shape.fields
+                and (shape.key == kind or kind not in link.derived(shop)[shape.source])
+                for other in sorted(
+                    (link.settable(shop, shape.source) & set(shape.identifier_kinds)) - {kind}
+                )
+            ),
+            None,
+        )
+        if choice is None:
             shop.miss(
                 rule,
-                f"records in {holder.source!r} carry only a {kind}, so one party cannot hold two "
-                f"of them and a second record of the same kind always reads as a stranger's",
+                f"nothing that carries a {kind} could hold two of them for one party: each "
+                f"such record either takes its {kind} from the record it names, or carries no "
+                f"reference of its own to whoever it is for. A source whose records carry a "
+                f"{kind} alongside a reference to the party they belong to is what makes a "
+                f"second {kind} readable as theirs rather than as a stranger's.",
             )
             continue
+        holder, other = choice
         owner = shop.identifier(other)
         for position in range(2):
             second = shop.blank(holder.source)
@@ -778,4 +893,8 @@ def emit(spec: AgentSpec, shapes: dict[str, CollectionShape], seed: int) -> Shop
     _populate(shop)
     for obligation in spec.policy.obligations:
         _obligation(shop, spec, obligation)
+    # Last, and after the floor, because a reference can only be pointed at a record once
+    # every record exists. See `link.py` for why an unlinked shop reports rules as reachable
+    # that an agent could never walk to.
+    link.link(shop)
     return shop

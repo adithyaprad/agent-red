@@ -47,6 +47,10 @@ class FieldKind(StrEnum):
 
     Attributes:
         IDENTIFIER: Names a record, here or in another collection.
+        MATCHED: A value the agent has to carry across from one call to another. Not an
+            identifier, though it took one to notice: a value compared between two calls is
+            shared vocabulary rather than a name for a record, so minting a fresh one per
+            record models it as something no two records could ever agree on.
         NUMBER: Compared against a limit.
         ENUM: One of a declared set of values.
         TEXT: Free text a person reads.
@@ -54,6 +58,7 @@ class FieldKind(StrEnum):
     """
 
     IDENTIFIER = "identifier"
+    MATCHED = "matched"
     NUMBER = "number"
     ENUM = "enum"
     TEXT = "text"
@@ -67,7 +72,9 @@ class FieldShape:
     Attributes:
         name: What records carry it under.
         kind: What sort of value it holds.
-        values: For an `ENUM`, the values the declaration allows. Empty otherwise.
+        values: For an `ENUM` or a `MATCHED` field, the values the declaration allows, where
+            it says. Empty otherwise, which for a matched field is a stated limitation rather
+            than an absence: see `Manifest.notes`.
         written_by: For a field a tool writes, the argument it is filled from. Used to work
             out which limit a field is the reachable side of.
     """
@@ -101,9 +108,9 @@ class CollectionShape:
     def add(self, shape: FieldShape) -> None:
         """Record a field, keeping the more specific of two readings of the same name.
 
-        A field named by two declarations is one field. `IDENTIFIER` and `ENUM` are more
-        specific than `NUMBER`, which is more specific than `TEXT`, so a field a rule compares
-        numerically is not downgraded to text by a channel that also writes into it.
+        A field named by two declarations is one field. `IDENTIFIER`, `MATCHED` and `ENUM` are
+        more specific than `NUMBER`, which is more specific than `TEXT`, so a field a rule
+        compares numerically is not downgraded to text by a channel that also writes into it.
         """
         existing = self.fields.get(shape.name)
         more_specific = existing is None or _RANK[shape.kind] > _RANK[existing.kind]
@@ -126,7 +133,8 @@ _RANK = {
     FieldKind.LIST: 1,
     FieldKind.NUMBER: 2,
     FieldKind.ENUM: 3,
-    FieldKind.IDENTIFIER: 4,
+    FieldKind.MATCHED: 4,
+    FieldKind.IDENTIFIER: 5,
 }
 """How specific each reading of a field is, most specific last."""
 
@@ -151,8 +159,8 @@ def _reads(tool: ToolDeclaration, source: str) -> bool:
 def _references(spec: AgentSpec) -> tuple[tuple[ResultReference, FieldKind], ...]:
     """Every result field a rule reads, with what the rule does to it.
 
-    A limit compares it numerically; a matching rule compares it as an identifier. Nothing
-    else in the policy vocabulary reads a result field, so those are the two.
+    A limit compares it numerically; a matching rule compares it against what the agent passed
+    back. Nothing else in the policy vocabulary reads a result field, so those are the two.
     """
     found: list[tuple[ResultReference, FieldKind]] = []
     for bound in spec.policy.bounds:
@@ -165,7 +173,7 @@ def _references(spec: AgentSpec) -> tuple[tuple[ResultReference, FieldKind], ...
         elif isinstance(bound, ImputedBound):
             found.append((bound.value_from, FieldKind.NUMBER))
         elif isinstance(bound, MatchingBound):
-            found.append((bound.matches, FieldKind.IDENTIFIER))
+            found.append((bound.matches, FieldKind.MATCHED))
     for precondition in spec.policy.preconditions:
         if precondition.succeeds_when is not None:
             required = next(
@@ -239,6 +247,31 @@ def shapes_for(spec: AgentSpec) -> dict[str, CollectionShape]:
             continue
         shape = shapes[tool.behaviour.source]
         values: tuple[str, ...] = ()
+        if kind is FieldKind.MATCHED:
+            # Whatever the declaration says this value may be, if it says anything. A value
+            # the agent must carry across is one it also has an opinion about, and the closer
+            # the record's value is to something it recognises the less likely it is to
+            # substitute one of its own.
+            #
+            # The two declarations meet at the argument rather than at the field. A matching
+            # rule says an argument must agree with a field of a result, and an allowlist
+            # constrains that same argument; the field the value is read off is named by
+            # whoever wrote the source tool and need not be called the same thing.
+            arguments = {
+                other.argument
+                for other in spec.policy.bounds
+                if isinstance(other, MatchingBound) and other.matches == reference
+            }
+            values = next(
+                (
+                    tuple(other.allowed_values)
+                    for other in spec.policy.bounds
+                    if isinstance(other, EnumeratedBound)
+                    and other.argument in arguments
+                    and other.allowed_values
+                ),
+                (),
+            )
         if kind is FieldKind.ENUM:
             for precondition in spec.policy.preconditions:
                 condition = precondition.succeeds_when
@@ -249,10 +282,20 @@ def shapes_for(spec: AgentSpec) -> dict[str, CollectionShape]:
         shape.add(FieldShape(name=reference.field, kind=kind, values=values))
 
     for channel in spec.config.channels:
-        if channel.data_source in shapes:
-            shapes[channel.data_source].add(
-                FieldShape(name=channel.record_path, kind=FieldKind.TEXT)
-            )
+        if channel.data_source not in shapes:
+            continue
+        shape = shapes[channel.data_source]
+        shape.add(FieldShape(name=channel.record_path, kind=FieldKind.TEXT))
+        shape.add(FieldShape(name=channel.record_key, kind=FieldKind.IDENTIFIER))
+        # A channel names the records of its own source, and that is a second place a key
+        # comes from. A source nothing fetches one record from otherwise has no key, so it
+        # holds no records at all, and a channel aimed at it plants into a collection that is
+        # empty: the write is refused, every attack down that channel fails before the agent
+        # is reached, and what the run reports is a harness that could not deliver rather than
+        # an agent that did or did not hold. That is how the first run against a generated
+        # shop spent its whole suite.
+        if not shape.key:
+            shape.key = channel.record_key
 
     return shapes
 

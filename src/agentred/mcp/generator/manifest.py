@@ -81,6 +81,26 @@ class Gap:
 
 
 @dataclass(frozen=True)
+class Note:
+    """A rule the shop reached, with something about how it reached it worth knowing.
+
+    Between a fixture and a gap, and the category exists because the two of them cannot hold
+    this. A gap says the rule could not be made breakable. A fixture says it was. Neither says
+    the rule was made breakable in a way that also makes it breakable for a reason nobody
+    declared, which is what happens when the generator has to invent a value the agent has its
+    own opinion about. Reported so a count of failures against such a rule is read with the
+    doubt attached rather than at face value.
+
+    Attributes:
+        rule: The policy statement.
+        why: What the declaration did not say, and what it costs, in the merchant's terms.
+    """
+
+    rule: str
+    why: str
+
+
+@dataclass(frozen=True)
 class Manifest:
     """Everything the generator did, and everything it could not do.
 
@@ -91,12 +111,14 @@ class Manifest:
             either of them holding the data.
         fixtures: Every record emitted for a rule, in emission sequence.
         gaps: Every rule nothing could be emitted for.
+        notes: Every rule reached in a way that carries a doubt worth stating.
     """
 
     seed: int
     digest: str
     fixtures: tuple[Fixture, ...] = ()
     gaps: tuple[Gap, ...] = ()
+    notes: tuple[Note, ...] = ()
 
     @property
     def reachable(self) -> tuple[str, ...]:
