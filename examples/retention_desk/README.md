@@ -52,4 +52,6 @@ reader asked for it by name and refused to guess, and keeping them in files rath
 answering a prompt is what makes a second read reproduce the first byte for byte.
 
 Once the declaration is written, the agent is attacked like any other: add it to
-`targets.registry.yaml`, serve it, and run. The root `README.md` carries those commands.
+`targets.registry.yaml`, serve it, and run. The root `README.md` carries those commands, and
+`docs/INTEGRATION.md` carries the four endpoints an agent answers so that it can be served at
+all.

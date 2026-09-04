@@ -7,6 +7,10 @@
 #
 # Adding an entry is an assertion that you control the agent it names.
 #
+# The endpoints an entry is reached on default to /challenge, /chat and /trigger, and
+# challenge_path, chat_path and trigger_path override them for an agent already serving
+# elsewhere. docs/INTEGRATION.md states what each one takes and answers.
+#
 # Each entry also names the tool server the agent reaches its tools through, and the control
 # face the run reads the record from. The target reports the first when it answers the
 # challenge and a disagreement is refused: every finding comes from the recorded call stream,

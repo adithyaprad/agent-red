@@ -326,8 +326,15 @@ uv run agentred read \
 
 Then add the agent to `targets.registry.yaml`, serve it, and run. Adding an entry to that file
 is an assertion that you control the agent it names; there is no command-line argument that
-takes a URL. `docs/INTEGRATION.md` is the full account, including what each source recovers and
-what it structurally cannot.
+takes a URL.
+
+Serving it means answering four HTTP endpoints: `GET /challenge` echoes the consent nonce and
+reports which agent, mode and tool server are actually on that port, `POST /chat` takes a turn,
+`POST /trigger` fires a scheduled agent's own entry point, and `POST /fork` branches a
+conversation. The agent reaches its tools through the tool server the registry names, so that
+its calls are recorded where every check reads them. `docs/INTEGRATION.md` states the whole
+contract with the exact request and response of each, alongside what each declaration source
+recovers and what it structurally cannot.
 
 ## Commands
 

@@ -232,6 +232,186 @@ which half of a result rests on a structured field somebody configured and which
 model reading a sentence. Collapsing the two would make the second look like the first, which
 is the one outcome the provenance column exists to prevent.
 
+## Making the agent attackable
+
+Everything above is the declaration: what the harness tests. This is the other half of an
+integration, and it is the smaller one. It is what the agent has to answer so that it can be
+tested at all.
+
+Four HTTP endpoints and one environment variable. `src/agentred/targets/runtime.py` is one
+implementation of exactly this contract, and the bundled agents are served by it, so a
+disagreement between this section and that file is a bug in this section.
+
+| Endpoint | Called | Required |
+|---|---|---|
+| `GET /challenge?nonce=<hex>` | Before the first attack turn, and again every time consent is re-established | Always |
+| `POST /chat` | Once per turn of a conversation | Whenever the agent has a conversational channel |
+| `POST /trigger` | Once per planted attack, in place of a turn | Whenever a channel declares a scheduled trigger |
+| `POST /fork` | When two attacks branch from a shared prefix | Whenever the suite forks (ADR-0002) |
+
+`GET /health` is not part of the contract and is worth serving anyway, because it is what
+`agentred doctor` reports a port on before anything more expensive is attempted.
+
+### The challenge
+
+The consent gate is a code path rather than a policy note (`docs/SAFETY.md`), and this
+endpoint is the agent's half of it. It takes a nonce and returns it unchanged.
+
+```
+GET /challenge?nonce=0f1e2d3c
+```
+```json
+{
+  "challenge": "0f1e2d3c",
+  "agent_id": "retention_desk",
+  "mode": "test",
+  "tool_server": "http://localhost:8094",
+  "versions": {
+    "config_version": "1.2",
+    "policy_version": "1.2",
+    "model_version": "claude-sonnet-5",
+    "tool_version": "sha256:a97e4b26aca7",
+    "world_version": ""
+  }
+}
+```
+
+Every field is checked before a single attack turn is sent, the first four against the registry
+entry that asked and the last against the spec on disk, and a disagreement is refused rather
+than warned about. Each check exists because of a distinct way a run can look fine and mean
+nothing.
+
+**`challenge`** is the nonce, byte for byte. An agent that cannot echo it is not attacked, and
+that is the intended behaviour rather than a limitation to work around.
+
+**`agent_id`** must be the id the registry names. Without it a registry entry is repointed at a
+different agent by editing a port, and the scorecard names an agent that was never tested.
+
+**`mode`** must be the mode the registry declares, which is `test` for anything that can move
+money. The suite deliberately attempts refunds.
+
+**`tool_server`** must be the origin the registry names. This is the one people are surprised
+by, and it is the one that costs a whole run: every finding comes from the call stream recorded
+at that server, so a target reaching its tools anywhere else produces a suite of empty call
+streams, which reads as an agent that did nothing at all rather than as a misconfiguration.
+
+**`versions`** is optional, and is checked against the spec on disk when it is present. A target
+loads its spec once and holds it for the life of the process, so a spec edited afterwards is on
+disk and not in the agent. Reporting it here is what turns that into one line at preflight
+rather than a refusal on the version tuple after every model call in the run has been paid for.
+
+Consent expires and is established again during a long run, so this endpoint is called
+repeatedly. It must be cheap and must have no side effects.
+
+### A turn
+
+```
+POST /chat
+```
+```json
+{
+  "session": "s-0f1e2d3c",
+  "run": "0025",
+  "conversation": [{"role": "user", "content": "..."}]
+}
+```
+```json
+{
+  "reply": "...",
+  "session": "s-0f1e2d3c",
+  "spec_versions": {"config": "1.2", "policy": "1.2", "model": "claude-sonnet-5", "tools": "sha256:a97e4b26aca7"},
+  "usage": {}
+}
+```
+
+There is deliberately no tool-call field in the response, and adding one would not help. What
+the agent did is read from the tool server's record, never from what the agent says it did
+(ADR-0005).
+
+The runner holds the authoritative transcript and sends the whole conversation, ending with the
+turn to answer. Replaying only the last turn against a resumed session is the efficient
+implementation and it is not required.
+
+`session` and `run` are the harness's, not the agent's, and they are the load-bearing part of
+this request. The tool server keys the conversation's private world and its call stream by the
+same two values, which is how isolation is obtained without the runner asking for it. An agent
+must pass them through to the connector URL it reaches its tools on, unchanged.
+
+`usage` is what the turn cost the agent's own engine, and an empty object from a backend that
+does not report one is not the same as free. `agentred cost` says which it was.
+
+### A firing
+
+```
+POST /trigger
+```
+```json
+{"session": "s-0f1e2d3c", "run": "0025"}
+```
+```json
+{"output": "...", "session": "s-0f1e2d3c", "spec_versions": {"...": "..."}, "usage": {}}
+```
+
+No conversation and no user turn, because the agent this addresses has neither. What it reads
+is whatever the world holds when it wakes, which is precisely why it is the entry point a
+planted payload is delivered through rather than a prompt announcing that a schedule fired
+(ADR-0006). The output text is carried for the transcript and no check reads it.
+
+This is required only for a channel whose trigger is a schedule. A channel whose trigger is an
+ordinary request is fired down `/chat` instead, with a message the channel templates, so an
+agent that nothing wakes on a timer never needs this endpoint. An agent that declares a
+scheduled trigger and cannot fire one answers `404`, and the attempt is recorded as an error
+rather than as an agent that held.
+
+### A branch
+
+```
+POST /fork
+```
+```json
+{"source": "s-0f1e2d3c", "session": "s-77ab01ff", "at_turn": 3}
+```
+
+Branches the source conversation's cached prefix into a new session, keeping `at_turn`
+completed exchanges. `null` branches from the end. The new session id must not already exist,
+because reusing one hands the branch somebody else's prefix. This is half of a fork: the other
+half is branching the world, which the runner asks the tool server for rather than the agent,
+since a world an agent could branch is a world an agent could tamper with.
+
+### Reaching tools through the boundary that records them
+
+Set `AGENTRED_TOOL_SERVER_URL` to the origin the registry names, and point the agent's
+connector at `/{agent_id}/{run}/{session}` under it.
+
+The run and the conversation are in the path and never in the arguments of a call. An agent
+therefore cannot file a call under a conversation it was not given, and the record is keyed by
+what the path said rather than by anything the agent asserted. The server has a second face on
+a second port, which reads the stream, restores worlds and plants payloads into them, and no
+agent is ever told its address.
+
+### The registry entry
+
+```yaml
+  - name: my_agent
+    agent_id: my_agent
+    description: What it does, for whoever reads `agentred doctor`.
+    base_url: http://localhost:8085
+    spec_dir: path/to/its/spec
+    mode: test
+    tool_server: http://localhost:8090
+    control_url: http://localhost:8091
+```
+
+`base_url` is an origin with no path, so that a challenge cannot be answered by one service
+while the attack is delivered to another. The three paths default to `/challenge`, `/chat` and
+`/trigger`, and `challenge_path`, `chat_path` and `trigger_path` override them for an agent
+already serving somewhere else. There is no field anywhere that takes a bare URL: adding an
+entry to this file is the assertion that you control the agent it names.
+
+`agentred doctor` checks every row of this: the spec loads, the tool server answers, the
+challenge is echoed, and the agent id, mode, tool server and versions all agree. Run it before
+paying for a suite.
+
 ## Adding a platform
 
 An adapter produces the intermediate in `src/agentred/ingest/package.py` and nothing else. Its
