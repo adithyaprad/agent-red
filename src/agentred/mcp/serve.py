@@ -51,11 +51,33 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Persist the call stream to this JSON lines file as well as in memory.",
     )
+    parser.add_argument(
+        "--generated",
+        action="store_true",
+        help=(
+            "Serve a shop derived from the agent's own declaration, and its tools from that "
+            "declaration too. One agent per server, because one shop is derived from one "
+            "declaration."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="What the generated shop derives from. Omit for the generator's fixed default.",
+    )
     arguments = parser.parse_args(argv)
 
     import uvicorn
 
-    server = build_server(arguments.specs, stream=arguments.stream)
+    server = build_server(
+        arguments.specs,
+        stream=arguments.stream,
+        generated=arguments.generated,
+        seed=arguments.seed,
+    )
+    if arguments.generated:
+        print(f"serving a generated shop, {server.world_version}", flush=True)
     tools = uvicorn.Server(
         uvicorn.Config(
             build_tool_app(server), host=arguments.host, port=arguments.port, log_level="info"

@@ -137,6 +137,7 @@ class ToolServer:
         *,
         arena: Arena | None = None,
         recorder: ToolCallRecorder | None = None,
+        serve_generically: bool = False,
     ) -> None:
         """Bind specs to implementations.
 
@@ -144,6 +145,13 @@ class ToolServer:
             specs: The agents to serve tools for. At least one.
             arena: Where worlds live. Defaults to a fresh one.
             recorder: Where calls are written. Defaults to an in-memory stream.
+            serve_generically: Ignore any registered hand-written surface and serve every
+                agent from what its own declaration describes. What a run against a
+                generated shop uses, because a hand-written handler reads fields it chose
+                the names of and a generated record carries only the fields some declared
+                rule reads. Serving one over the other silently would answer every lookup
+                with a record that looks empty, and the run would read as an agent nobody
+                could talk into anything.
 
         Raises:
             ToolServerError: If no specs are given, an agent id repeats, or a spec declares
@@ -165,7 +173,7 @@ class ToolServer:
             # declaration describes. The two shipped agents keep theirs, because they are the
             # fixture a generic one is checked against; an agent nobody wrote code for is
             # served from what its merchant declared and needs nothing registered here.
-            toolset = TOOLSETS.get(agent_id)
+            toolset = None if serve_generically else TOOLSETS.get(agent_id)
             if toolset is None:
                 try:
                     toolset = toolset_for(spec)
@@ -404,6 +412,16 @@ def build_control_app(server: ToolServer) -> Any:
                 agent_id: server.versions(agent_id).model_dump(mode="json")
                 for agent_id in server.agent_ids
             },
+            # Who the harness may act as, from the process that holds the world rather than
+            # from the files on disk. A subject names records, so a cast and a world are one
+            # fact: reading the cast from a spec directory while the records come from here
+            # is how a suite comes to be about identities that do not exist.
+            "subjects": {
+                agent_id: [
+                    subject.model_dump(mode="json") for subject in server.spec(agent_id).subjects
+                ]
+                for agent_id in server.agent_ids
+            },
         }
 
     @app.get("/calls/{run}/{session}")
@@ -496,22 +514,61 @@ def build_control_app(server: ToolServer) -> Any:
     return app
 
 
-def build_server(spec_dirs: Sequence[Path], *, stream: Path | None = None) -> ToolServer:
+def build_server(
+    spec_dirs: Sequence[Path],
+    *,
+    stream: Path | None = None,
+    generated: bool = False,
+    seed: int | None = None,
+) -> ToolServer:
     """Load specs from disk and build the server that serves their tools.
 
     Args:
         spec_dirs: Directories each holding `config.yaml` and `policy.yaml`.
         stream: Where to persist the call stream, as JSON lines. `None` keeps it in memory,
             which is enough when the runner reads it over the control face.
+        generated: Serve a shop derived from the agent's own declaration rather than the
+            hand-authored one, and serve its tools from that declaration too (ADR-0007).
+        seed: What the generated shop derives from. `None` takes the generator's default,
+            which is fixed rather than random so a verdict reproduces.
 
     Returns:
         The server.
 
     Raises:
         SpecError: If a spec does not load.
-        ToolServerError: If a spec has no implementations behind it.
+        ToolServerError: If a spec has no implementations behind it, or if a generated shop
+            was asked for with more than one agent.
     """
     from agentred.spec import load_spec_dir
 
     specs = [load_spec_dir(directory) for directory in spec_dirs]
-    return ToolServer(specs, recorder=ToolCallRecorder(path=stream))
+    if not generated:
+        return ToolServer(specs, recorder=ToolCallRecorder(path=stream))
+
+    # One shop per process, so one agent per process. A world is generated from one
+    # declaration, and the arena holds a single seed for every session it serves. Two agents
+    # here would put the second one in a shop shaped backwards from somebody else's rules,
+    # where its own rules are unreachable and the run reads as an agent that held.
+    if len(specs) != 1:
+        raise ToolServerError(
+            f"a generated shop is derived from one declaration, so this server can serve one "
+            f"agent, and {len(specs)} were given. Start a server per agent."
+        )
+    from copy import deepcopy
+
+    from agentred.mcp.generator import generate
+
+    shop = generate(specs[0], seed) if seed is not None else generate(specs[0])
+    # The spec the server holds carries the shop's own cast, not the one on disk. A subject
+    # names records, and a hand-written subject standing in a generated shop names nothing:
+    # the agent is asked about a reference it cannot find, says so truthfully, and every rule
+    # reports as never in play. On a planted channel the write is refused outright. The
+    # server is where this belongs because the server is the process that holds the world,
+    # and it is what the runner reads its subjects back from.
+    return ToolServer(
+        [shop.spec_for(specs[0])],
+        arena=Arena(seed_world=lambda: deepcopy(shop.world)),
+        recorder=ToolCallRecorder(path=stream),
+        serve_generically=True,
+    )

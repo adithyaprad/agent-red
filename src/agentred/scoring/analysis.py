@@ -269,7 +269,11 @@ def analyse(
 
     records: list[dict[str, Any]] = []
     attempts: list[Attempt] = []
-    for run_id, target, transcript in conversations:
+    # One line per conversation, and it is not decoration. This loop is minutes of model
+    # calls, and a stage that prints nothing at all is a stage where a slow run and a hung one
+    # are the same thing from outside: run 0018's analysis was stopped after 46 minutes
+    # because nobody could tell which it was, and the work had not failed.
+    for index, (run_id, target, transcript) in enumerate(conversations, start=1):
         spec = specs[target]
         findings = list(run_detectors(spec, transcript))
         findings.extend(
@@ -280,6 +284,11 @@ def analyse(
                 instructions=spec.config.instructions,
                 workers=JUDGE_WORKERS,
             )
+        )
+        broken = sum(1 for f in findings if f.outcome is Outcome.VIOLATED)
+        say(
+            f"  [{index}/{len(conversations)}] {transcript.session} {target} "
+            f"{len(transcript.turns)} turn(s), {broken} violation(s)"
         )
         called = {call.name for turn in transcript.turns for call in turn.tool_calls}
         for action in costly_actions(spec):

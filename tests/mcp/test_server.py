@@ -133,9 +133,21 @@ async def test_a_policy_breaking_call_succeeds_because_the_tools_do_not_enforce_
 
 
 def test_an_agent_with_no_implementations_is_refused_at_construction() -> None:
+    """An agent nobody wrote handlers for, whose declaration does not describe them either.
+
+    The premise is built here rather than borrowed from a shipped config. Both shipped agents
+    now describe every tool they declare, so a test that leant on one of them being
+    incomplete would pass for a reason that has nothing to do with what it checks, and would
+    break again the next time a config is finished.
+    """
     spec = load_spec_dir(f"{SPEC_ROOT}/dispute_handler")
+    undescribed = tuple(tool.model_copy(update={"behaviour": None}) for tool in spec.config.tools)
     renamed = spec.model_copy(
-        update={"config": spec.config.model_copy(update={"agent_id": "unknown_agent"})}
+        update={
+            "config": spec.config.model_copy(
+                update={"agent_id": "unknown_agent", "tools": undescribed}
+            )
+        }
     )
     with pytest.raises(ToolServerError, match="no tool implementations"):
         ToolServer([renamed])
@@ -324,3 +336,90 @@ def test_the_tool_face_carries_nothing_the_control_face_carries() -> None:
     tool_app = build_tool_app(server_for("dispute_handler"))
     paths = {getattr(route, "path", "") for route in tool_app.routes}
     assert not {path for path in paths if "calls" in path or "restore" in path or "plant" in path}
+
+
+class TestServingAGeneratedShop:
+    """An agent attacked inside a shop derived from its own declaration, reached through
+    tools derived from the same declaration.
+
+    Until this path existed the generator was checked only against itself: it produced a shop
+    and a manifest, and every live run then switched to the hand-authored shop the milestone
+    existed to remove.
+    """
+
+    def build(self, *names: str, seed: int | None = None):
+        from pathlib import Path
+
+        from agentred.mcp.server import build_server
+
+        return build_server(
+            [Path(f"{SPEC_ROOT}/{name}") for name in names], generated=True, seed=seed
+        )
+
+    def test_the_shop_is_derived_rather_than_read_from_disk(self) -> None:
+        from agentred.mcp.world import fresh_world
+
+        server = self.build("dispute_handler")
+        assert server.world_version != fresh_world().digest
+
+    def test_every_declared_tool_is_served_from_the_declaration(self) -> None:
+        """A hand-written surface is ignored on purpose. It reads fields it chose the names
+        of, and a generated record carries only the fields some declared rule reads, so
+        serving one over the other answers every lookup with a record that looks empty."""
+        from agentred.mcp.tools import TOOLSETS
+
+        server = self.build("dispute_handler")
+        assert server.toolsets["dispute_handler"] is not TOOLSETS["dispute_handler"]
+        declared = {tool.name for tool in server.spec("dispute_handler").config.tools}
+        assert server.toolsets["dispute_handler"].names == declared
+
+    def test_a_generated_record_can_actually_be_read(self) -> None:
+        server = self.build("dispute_handler")
+        world = server.arena.world("s1")
+        dispute_id = sorted(world["disputes"])[0]
+        answer = server.call(
+            Binding("dispute_handler", "r1", "s1"), "get_dispute", {"dispute_id": dispute_id}
+        )
+        assert answer["dispute_id"] == dispute_id
+
+    def test_a_call_over_a_ceiling_is_served_and_recorded(self) -> None:
+        """The tool surface never refuses. A tool that enforced the limit would be answering
+        the question the run exists to ask, and the violation is read off the argument the
+        agent passed rather than off anything the shop did about it."""
+        server = self.build("dispute_handler")
+        binding = Binding("dispute_handler", "r1", "s1")
+        order_id = sorted(server.arena.world("s1")["orders"])[0]
+        answer = server.call(binding, "apply_discount", {"order_id": order_id, "percent": 35})
+
+        assert "error" not in answer
+        recorded = server.recorder.calls("r1", "s1")
+        assert recorded[-1].arguments["percent"] == 35
+
+    def test_each_session_gets_its_own_copy(self) -> None:
+        server = self.build("dispute_handler")
+        order_id = sorted(server.arena.world("s1")["orders"])[0]
+        server.call(
+            Binding("dispute_handler", "r1", "s1"),
+            "apply_discount",
+            {"order_id": order_id, "percent": 35},
+        )
+        assert server.arena.world("s2")["orders"][order_id]["discount_percent"] == 0.0
+
+    def test_the_same_seed_serves_the_same_shop(self) -> None:
+        assert self.build("dispute_handler", seed=7).world_version == (
+            self.build("dispute_handler", seed=7).world_version
+        )
+
+    def test_a_different_seed_serves_a_different_shop(self) -> None:
+        """The shop is the fifth element of the validity tuple, so two runs against two shops
+        have to be distinguishable rather than comparable."""
+        assert self.build("dispute_handler", seed=7).world_version != (
+            self.build("dispute_handler", seed=8).world_version
+        )
+
+    def test_two_agents_cannot_share_one_generated_shop(self) -> None:
+        """A shop is derived from one declaration. A second agent in it would be acting in a
+        world shaped backwards from somebody else's rules, where its own are unreachable and
+        the run reads as an agent that held."""
+        with pytest.raises(ToolServerError, match="one agent"):
+            self.build("dispute_handler", "cart_recovery")

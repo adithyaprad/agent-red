@@ -35,13 +35,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agentred.mcp.generator.cast import cast, unsupported
 from agentred.mcp.generator.emit import emit
-from agentred.mcp.generator.manifest import Fixture, Gap, Manifest, Reach, digest_of
+from agentred.mcp.generator.manifest import Fixture, Gap, Manifest, Note, Reach, digest_of
 from agentred.mcp.generator.shape import CollectionShape, FieldKind, FieldShape, shapes_for
 from agentred.mcp.tools.base import ToolSet
 from agentred.mcp.tools.generic import toolset_for
 from agentred.mcp.world import World
-from agentred.spec.models import AgentSpec
+from agentred.spec.models import AgentSpec, Subject
 
 DEFAULT_SEED = 20260903
 """What a world is generated from when nobody says. Fixed rather than random, because a
@@ -58,11 +59,29 @@ class GeneratedWorld:
         manifest: Which fixture makes each rule reachable, and which rules nothing could.
         shapes: What each collection's records carry, kept so a caller can say why a field is
             there without re-deriving it.
+        subjects: Identities the harness may act as in this shop. Derived here rather than
+            read from the declaration, because a subject names records and the records are
+            these. A cast written against a different shop names nothing that exists.
+        unsupported: Declared channels no identity here can be attacked down, with what the
+            declaration did not say. The same argument as a gap, one level out: a channel
+            nobody can be attacked through and a channel that was attacked and held are
+            identical on a coverage grid.
     """
 
     world: World
     manifest: Manifest
     shapes: dict[str, CollectionShape]
+    subjects: tuple[Subject, ...] = ()
+    unsupported: tuple[tuple[str, str], ...] = ()
+
+    def spec_for(self, spec: AgentSpec) -> AgentSpec:
+        """The declaration as it applies to this shop: its own subjects, everything else kept.
+
+        The version tuple is deliberately untouched. Who the harness may act as is a fixture
+        rather than a rule, and a scorecard is valid for a declaration and a world, both of
+        which this leaves exactly as they were.
+        """
+        return spec.model_copy(update={"subjects": self.subjects})
 
     def tools(self, spec: AgentSpec) -> ToolSet:
         """The tool surface this world is reached through, served from the declaration.
@@ -103,8 +122,16 @@ def generate(spec: AgentSpec, seed: int = DEFAULT_SEED) -> GeneratedWorld:
         digest=digest_of(collections),
         fixtures=tuple(shop.fixtures),
         gaps=tuple(shop.gaps),
+        notes=tuple(shop.notes),
     )
-    return GeneratedWorld(world=world, manifest=manifest, shapes=shapes)
+    subjects = cast(spec, shop)
+    return GeneratedWorld(
+        world=world,
+        manifest=manifest,
+        shapes=shapes,
+        subjects=subjects,
+        unsupported=unsupported(spec, subjects),
+    )
 
 
 __all__ = [
@@ -116,7 +143,9 @@ __all__ = [
     "Gap",
     "GeneratedWorld",
     "Manifest",
+    "Note",
     "Reach",
+    "Subject",
     "generate",
     "shapes_for",
 ]

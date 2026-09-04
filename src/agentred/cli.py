@@ -59,7 +59,7 @@ from agentred.scoring.cost import build_report
 from agentred.scoring.cost import render as render_cost
 from agentred.scoring.render import build
 from agentred.spec import SpecError, load_spec_dir
-from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec
+from agentred.spec.models import CONVERSATIONAL_CHANNEL, AgentSpec, Subject
 from agentred.store.repo import Store
 
 DEFAULT_STORE = Path("data/agentred.db")
@@ -441,6 +441,39 @@ def _report_cost(
     )
 
 
+def _as_served(spec: AgentSpec, target: RegisteredTarget) -> AgentSpec:
+    """The declaration with the identities the tool server is actually serving.
+
+    A subject names records, so a cast and a world are one fact rather than two. When the
+    server is holding a shop derived from the declaration, the cast on disk names records
+    that shop does not have: the agent is asked about a reference it cannot find, answers
+    truthfully, and every rule reports as never in play, which reads as an agent nobody could
+    talk into anything. Down a planted channel it is louder and cheaper to spot, because the
+    write is refused and the whole suite errors before the agent is reached.
+
+    Everything else is left as the files say. Who may be impersonated is a fixture rather
+    than a rule, and the version tuple a scorecard is valid for does not move.
+
+    A server that reports no cast leaves the spec alone, which is the ordinary hand-authored
+    case and every run recorded before this existed.
+    """
+    from agentred.mcp.control import ControlError, HttpxArenaControl
+
+    if not target.control_url:
+        return spec
+    try:
+        reported = HttpxArenaControl(target.control_url).health().get("subjects") or {}
+    except ControlError:
+        # Not this function's failure to report. `doctor` and the preflight already refuse a
+        # run whose tool server cannot be reached, and saying it twice makes both easier to
+        # ignore.
+        return spec
+    served = reported.get(spec.config.agent_id) if isinstance(reported, dict) else None
+    if not served:
+        return spec
+    return spec.model_copy(update={"subjects": tuple(Subject(**entry) for entry in served)})
+
+
 @app.command()
 def run(
     target: Annotated[str, typer.Option("--target", help="Registered target name.")],
@@ -490,7 +523,8 @@ def run(
     the prose before the suite is built is what lets those rules be aimed at on purpose
     rather than tripped over by an attack pointed at something else.
     """
-    spec = load_spec_dir(load_registry().resolve(target).spec_dir)
+    registered = load_registry().resolve(target)
+    spec = _as_served(load_spec_dir(registered.spec_dir), registered)
     if list_stakes:
         for derived in derive_stakes(spec):
             typer.echo(derived.id)
@@ -687,6 +721,15 @@ def world(
             typer.echo(f"  {fixture.reach.value:<10} {rule}: {fixture.why}")
     for gap in manifest.gaps:
         typer.echo(f"  no fixture {gap.rule}: {gap.why}")
+    for note in manifest.notes:
+        typer.echo(f"  with doubt {note.rule}: {note.why}")
+
+    typer.echo(f"cast      {len(generated.subjects)} identity(s), from the records they are about")
+    for subject in generated.subjects:
+        named = ", ".join(f"{kind}={value}" for kind, value in sorted(subject.identifiers.items()))
+        typer.echo(f"  {subject.name}: {named}")
+    for name, why in generated.unsupported:
+        typer.echo(f"  no identity {name}: {why}")
 
     if out is not None:
         out.write_text(
@@ -698,6 +741,11 @@ def world(
                     "collections": generated.world.collections,
                     "fixtures": [asdict(fixture) for fixture in manifest.fixtures],
                     "gaps": [asdict(gap) for gap in manifest.gaps],
+                    "notes": [asdict(note) for note in manifest.notes],
+                    "subjects": [subject.model_dump(mode="json") for subject in generated.subjects],
+                    "unsupported_channels": [
+                        {"channel": name, "why": why} for name, why in generated.unsupported
+                    ],
                 },
                 indent=2,
                 default=str,

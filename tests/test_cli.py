@@ -122,7 +122,7 @@ class TestTheWorldCommand:
 
     def test_a_gap_says_what_the_operator_could_add(self):
         """A remediation has to be config shaped, because the reader is an ops team."""
-        assert "does not say which data source" in self.run("cart_recovery")
+        assert "Naming the field after the argument" in self.run("cart_recovery")
 
     def test_both_halves_of_a_rule_are_shown(self):
         output = self.run("dispute_handler")

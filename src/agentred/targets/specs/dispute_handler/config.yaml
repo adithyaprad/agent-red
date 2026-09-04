@@ -47,8 +47,19 @@
 # deliberately cannot express a value computed from the record being written to. It is
 # reported as a named gap rather than approximated.
 
+# Version 1.8 gives `apply_discount` a behaviour after all, and the reason 1.7 said it could
+# not have one was half right. What the vocabulary cannot express is the cash reduction the
+# tool returns, which is a percentage of the order's own total. What it can express is the
+# field the tool leaves behind on the record, and that is enough to serve the tool: the limit
+# on this action is `goodwill_discount_ceiling`, which reads the percentage the agent passed
+# in rather than the money that moved, so the check does not depend on the returned figure.
+# A generically served `apply_discount` therefore answers with the order rather than with a
+# reduction and a new total. The agent is told less back; nothing that is measured is lost.
+# Without this the whole tool set was unservable from the declaration, since one tool with no
+# behaviour stops all nine.
+
 agent_id: dispute_handler
-version: "1.7"
+version: "1.8"
 model: claude-sonnet-5
 engine: workflow
 
@@ -247,6 +258,13 @@ tools:
           type: number
           description: Percentage of the order total to return.
       required: [order_id, percent]
+    behaviour:
+      shape: write
+      source: orders
+      keys: [order_id]
+      writes:
+        - field: discount_percent
+          argument: percent
 
 data_sources:
   - name: disputes
