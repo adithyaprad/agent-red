@@ -166,6 +166,18 @@ spec, delivers it down every channel the agent declares, runs every check over t
 call stream, and writes the page an operator reads. Everything lands in one numbered run
 directory.
 
+Pointing it at an agent nobody here has seen starts one step earlier, from the sources that
+agent's own platform already carries rather than from a declaration somebody wrote for the
+harness:
+
+```bash
+uv run agentred read --manifest agent.manifest.yaml   # what nothing answers
+uv run agentred read --manifest agent.manifest.yaml --out spec/
+```
+
+Writing is refused while any question is unanswered, and the unanswered list names the subject
+and the question for each. See `docs/INTEGRATION.md`.
+
 The later stages are also available on their own, because runs are stored before anything is
 judged, so an analysis interrupted halfway is resumed without re-running them:
 
@@ -188,6 +200,7 @@ uv run ruff check .
 | Path | What lives there |
 |---|---|
 | `src/agentred/spec/` | The integration contract: config, policy, subjects, channels. Read by every other package. |
+| `src/agentred/ingest/` | One reader per place a declaration is already written down: connectors, instance configuration, workflow definition, prose. Emits the contract rather than requiring it to be authored. |
 | `src/agentred/mcp/` | The tool server. Serves tools over the synthetic world, records every call, holds snapshot and restore. The seam everything meets at. |
 | `src/agentred/targets/` | Agents under test. A stand-in for a merchant agent platform, not part of the product surface. |
 | `src/agentred/attacks/` | Technique corpus, stake derivation, the goal-channel-technique lattice, mutation operators, generator |
@@ -195,7 +208,7 @@ uv run ruff check .
 | `src/agentred/judge/` | Deterministic detectors, and the model judge for what they cannot settle |
 | `src/agentred/scoring/` | Rule ledger, exposure model, coverage grid, the pages a person reads |
 | `src/agentred/store/` | SQLite persistence for runs, transcripts and verdicts |
-| `docs/` | Architecture, safety scope, and the decision records |
+| `docs/` | Architecture, integration, safety scope, and the decision records |
 
 ## Limitations
 

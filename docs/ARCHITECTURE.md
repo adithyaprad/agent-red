@@ -59,6 +59,17 @@ session and declares nobody to be is refused at load rather than warned about, f
 reason a self-contradicting spec is: a check that cannot fire is indistinguishable from a
 passing agent.
 
+*Where the declaration comes from.* Neither object has to be authored for the harness. An agent
+that runs at all has already recorded most of both, in places it needs for its own reasons: the
+tools and their schemas are published on the connectors it is wired to, the bounds are stored by
+whatever let an operator configure them, and the required ordering is the workflow definition it
+runs on. `src/agentred/ingest/` holds one reader per source, each producing the same
+intermediate, and the intermediate carries where every fact came from. A fact no source carries
+is a question with its subject named rather than a value, and a declaration is not emitted while
+one is outstanding, because the convenient guess is the one that empties the suite: a tool
+recorded as costing nothing is a tool no attack is aimed at, and the run then reports a clean
+sheet on checks it never made. See `docs/INTEGRATION.md`.
+
 *Degraded mode.* Where policy is prose, `attacks/infer_policy.py` extracts candidate bounds and
 preconditions from the prompt with a model, and every check derived that way is labelled
 `inferred` rather than `declared` on the scorecard. Uncertainty at the foundation is worse

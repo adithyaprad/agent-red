@@ -766,10 +766,6 @@ def report(
     typer.echo(f"report  {out}")
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command()
 def read(
     manifest: Annotated[
@@ -839,3 +835,7 @@ def read(
     typer.echo(f"  wrote {', '.join(written)} to {out}")
     if spec is None:
         typer.echo("  no policy was recovered, so this declares a surface and bounds nothing")
+
+
+if __name__ == "__main__":
+    app()
