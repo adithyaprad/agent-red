@@ -286,6 +286,37 @@ expressing it needs a small language in the config and the person writing that c
 ops team. Such a tool is reported as a named gap. Both shipped agents keep their hand-written
 handlers, which is what a generic one is checked against.
 
+**A reference has to resolve, and a record's own fields are not enough.** A limit is settled
+without leaving the record it sits on, and almost nothing else is: an action that must follow a
+read of the record it acts on, a message that may carry only this party's details, a figure read
+off one record before the call bounded by it. Emitters build one record each, so every reference
+was minted from its own counter and pointed at nothing, and because reachability is decided when
+a record is emitted the manifest went on reporting those rules as reached. `mcp/generator/link.py`
+runs after emission and rewrites references onto records that exist, keeping the equivalence
+classes the emitters set: a pair a fixture made agree stays agreeing, a pair it made differ stays
+differing. It invents no relationship. Two fixtures for one rule are two records, and `Shop.put`
+raises rather than overwriting when they would share a key, because the manifest is the whole of
+the reachability argument and it is written from what the emitters say they did.
+
+**A world has a fourth per-agent part, and it is who the harness acts as.** The identities the
+harness may act as are declared per agent, in `src/agentred/targets/specs/dispute_handler/subjects.yaml`
+and its counterpart, and they name records: a cast written for one shop names nothing in another. Down a planted channel that is
+loud: the write is refused and the suite errors before the agent is reached. Down a conversation
+it is silent, because the agent is asked about a reference it cannot find, says so truthfully,
+and every rule reports as never in play. `mcp/generator/cast.py` derives the cast from the
+fixtures, anchoring each identity on a record some rule exists for and stating as facts only what
+those records hold, and the tool server serves it on its health face because a cast and a world
+are one fact. Both halves are represented, breakable and holding, for the same reason the
+fixtures are. A channel no generated identity can reach is named rather than attacked.
+
+**The manifest can say three things about a rule, not two.** A gap says the rule could not be
+made breakable and a fixture says it was. Neither carries the case where a rule was made
+breakable and also made breakable for a reason nobody declared, which is what happens when the
+generator has to invent a value the agent has its own opinion about: a field a matching rule
+compares is shared vocabulary rather than a name for a record, and where the declaration does not
+say which values it may take, an agent can substitute one it recognises. `Manifest.notes` carries
+that, so a count of failures against such a rule is read with the doubt attached.
+
 **The shop joins the validity tuple.** `VersionTuple` gained a fifth element, a content digest
 of the world the run was against, reported by the tool server because that is the process
 holding one. A scorecard computed against one shop says nothing about an agent facing another,

@@ -189,3 +189,37 @@ value computed from the record being written to. Adding a small expression langu
 every declared tool arguable and would be written by an ops team. So it is reported as a gap,
 and the number the first run prints against a real agent is 87 percent rather than 100. That is
 the correct direction for it to be wrong in.
+
+## Amendment, 2026-09-04: what serving the world found
+
+The decision above is unchanged. What it did not anticipate is that three of its properties
+are only observable once an agent is actually acting inside the shop, and each of them failed
+silently in the direction that reads as good news.
+
+**A record is not enough; a reference has to resolve.** A record's own fields settle a limit,
+and a limit is the rule the decision was argued through. Almost nothing else is settled that
+way: an action that must follow a read of the record it acts on, a message that may carry only
+this party's details, a figure read off one record before the call bounded by it. Emitters
+build one record each and mint every reference from its own counter, so nothing pointed at
+anything. Reachability is decided when a record is emitted, so the manifest kept reporting
+those rules as reached. `mcp/generator/link.py` resolves references after emission, preserving
+the equivalence classes the emitters set, and it invents no relationship.
+
+**Two fixtures for one rule have to be two records.** Where both halves agreed on the
+collection's own key, the second overwrote the first and the manifest described one record
+twice. A key collision now raises rather than overwriting, because the manifest is the whole of
+the reachability argument and it is written from what the emitters say they did.
+
+**A world has a fourth per-merchant part, and it is who the harness acts as.** `subjects.yaml`
+names records. A cast written for one shop names nothing in another, so a suite against a
+generated world attacks identities that do not exist: refused outright on a planted channel,
+and silently answered "no such record" on a conversational one, where every rule then reports
+as never in play. The cast is derived from the fixtures and served by the process that holds
+the world, because a cast and a world are one fact. A channel no generated identity can reach
+is named rather than attacked.
+
+**A third thing the manifest can say.** A gap says a rule could not be made breakable and a
+fixture says it was. Neither can say a rule was made breakable and also made breakable for a
+reason nobody declared, which is what happens when the generator must invent a value the agent
+has its own opinion about. `Manifest.notes` carries that, so a count of failures against such a
+rule is read with the doubt attached rather than at face value.
