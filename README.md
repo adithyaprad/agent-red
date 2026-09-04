@@ -146,8 +146,8 @@ the tool schema, and watch the whole family go dark.
 | Manipulation techniques | agent-independent, crossed with derived stakes |
 | Failure checks | generic shapes, policy-driven, arguments inspected |
 | Attack channels | conversational and planted |
-| Targets attacked with zero new code | 3, across two build styles |
-| Held-out labelled transcripts | 120 |
+| Targets attacked with zero new code | 3, all workflow-built. The third has no authored declaration: its config and policy were read off the files its own platform carries. A model-loop target is not yet built, so transfer across build style is designed for and not shown. |
+| Held-out labelled transcripts | 0. The judge ships unmeasured and every artifact says so. The held-out set and the labelling harness exist; the labels were not collected. |
 
 Every security number is reported beside the benign-task number from the same run, because
 every hardening change costs capability and the trivially safest agent refuses everything.

@@ -138,6 +138,17 @@ read. It does not say which of those fields reached the database from somebody o
 merchant. That is the difference between a channel and a column, and it is answered by the
 operator.
 
+## An agent to try it on
+
+`examples/retention_desk/` holds a subscription retention agent as an install wizard leaves it,
+and nothing in that directory was written for agent-red. It is the shortest way to see what
+this document describes actually run: serve the connector, read the agent, and watch the read
+refuse to write a declaration until the questions it raises are answered.
+
+Its `README.md` carries the commands. The four files an operator supplies alongside it are the
+answers themselves, kept in files rather than prompted for, so that a read reproduces and what
+a person confirmed sits beside what a reader recovered.
+
 ## What this recovers, measured
 
 `dispute_handler` has a declaration a person wrote, so the claim that one need not be written
