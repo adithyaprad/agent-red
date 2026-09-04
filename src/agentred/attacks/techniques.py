@@ -35,10 +35,18 @@ from pydantic import (
     model_validator,
 )
 
+from agentred.paths import repo_path
 from agentred.spec.models import CHANNEL_FAMILIES, CONVERSATIONAL_CHANNEL, PLANTED_FAMILY
 
-DEFAULT_CORPUS_DIR = Path(__file__).resolve().parents[3] / "data" / "techniques"
-"""Where the checked-in corpus lives, relative to the installed package."""
+
+def default_corpus_dir() -> Path:
+    """Where the checked-in technique corpus lives.
+
+    Looked up rather than computed from this module's location, because the package is not
+    always inside the working tree that carries `data/`. See `agentred.paths`.
+    """
+    return repo_path("data", "techniques")
+
 
 MINIMUM_CORPUS_SIZE = 12
 """Below this the corpus is not a corpus, and a short one is almost always a bad path."""
@@ -319,7 +327,7 @@ def load_corpus(directory: Path | str | None = None) -> tuple[Technique, ...]:
             refused rather than warned about, because the usual cause is a wrong path and
             the usual symptom is a suite that passes everything.
     """
-    directory = Path(directory) if directory is not None else DEFAULT_CORPUS_DIR
+    directory = Path(directory) if directory is not None else default_corpus_dir()
     if not directory.is_dir():
         raise TechniqueError(f"{directory}: no such technique directory")
 

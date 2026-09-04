@@ -28,8 +28,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-STORE_DIR = Path(__file__).resolve().parents[3] / "data" / "store"
-"""Where the seed files live, relative to the repository root."""
+from agentred.paths import repo_path
+
+
+def store_dir() -> Path:
+    """Where the seed files for the hand-authored shop live.
+
+    Looked up rather than computed from this module's location, because the package is not
+    always inside the working tree that carries `data/`. See `agentred.paths`.
+    """
+    return repo_path("data", "store")
+
 
 Record = dict[str, Any]
 """One row. Whatever the declaration says a record of its kind carries."""
@@ -159,7 +168,7 @@ def _seed() -> World:
     """
 
     def read(name: str) -> dict[str, Any]:
-        return json.loads((STORE_DIR / name).read_text(encoding="utf-8"))
+        return json.loads((store_dir() / name).read_text(encoding="utf-8"))
 
     catalog = read("catalog.json")
     people = read("customers.json")
