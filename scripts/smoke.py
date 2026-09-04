@@ -1,7 +1,7 @@
 """Run a handful of real attacks against a served target, and record everything.
 
-**This is not a measurement.** Nothing here is scored, published, or turned into held-out
-data. It settles one assumption that everything after it rests on: whether a model handed a
+**This is not a measurement.** Nothing here is scored or reported. It settles one
+assumption that everything after it rests on: whether a model handed a
 technique and an objective writes turns as persuasive as the hand-written exemplars in
 `data/techniques/`. If it writes politely, a low violation rate would mean the attacker was
 weak rather than the agent safe, and every number the suite produces afterwards inherits
@@ -38,12 +38,12 @@ from agentred.runner.suite import (
     DEFAULT_ATTACKER_MODEL,
     DEFAULT_CONCURRENCY,
     DEFAULT_MAX_TURNS,
-    RUNS_ROOT,
     Outcome,
     SuiteRun,
     execute,
     next_run_dir,
     persist,
+    runs_root,
     select,
     summarise,
     to_json,
@@ -59,7 +59,6 @@ __all__ = [
     "COUNTER_FILENAME",
     "DEFAULT_CONCURRENCY",
     "DEFAULT_MAX_TURNS",
-    "RUNS_ROOT",
     "SMOKE_MODEL",
     "Outcome",
     "SmokeRun",
@@ -68,6 +67,7 @@ __all__ = [
     "main",
     "next_run_dir",
     "persist",
+    "runs_root",
     "select",
     "summarise",
     "to_json",

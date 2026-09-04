@@ -18,6 +18,7 @@ the main thread to be written. Persistence was never the slow part.
 
 from __future__ import annotations
 
+import os
 import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -51,14 +52,37 @@ that have to be cheap enough to repeat.
 DEFAULT_CONCURRENCY = 4
 DEFAULT_MAX_TURNS = 6
 
-RUNS_ROOT = Path.home() / "Desktop" / "agent-red-private" / "runs"
-"""Where runs are kept, outside the repository.
+RUNS_DIR_ENV_VAR = "AGENTRED_RUNS_DIR"
+
+DEFAULT_RUNS_ROOT = Path("out") / "runs"
+"""Where runs are kept unless the environment says otherwise.
 
 A run holds complete transcripts of an agent being manipulated, the full prompts that did it,
-and what it cost. None of that belongs in a repository someone else will read, and a timestamped
-directory inside `data/` is one `git add .` away from being in one. It lives beside the plan and
-the engineering log, which is where the rest of this project's private material already is.
+and what it cost. None of that belongs in a repository someone else will read, so the default
+is a directory the repository ignores rather than one it tracks: a run written into `data/` is
+one `git add .` away from being published. `AGENTRED_RUNS_DIR` moves them anywhere, which is
+what an operator keeping evidence outside a checkout sets.
 """
+
+
+def runs_root(env: dict[str, str] | None = None) -> Path:
+    """Where this installation keeps its runs.
+
+    Read per call rather than at import, so that a process serving several runs picks up a
+    change and so a test can point one somewhere without reloading the module.
+
+    Args:
+        env: Environment to read. Defaults to `os.environ`.
+
+    Returns:
+        `AGENTRED_RUNS_DIR` if it is set to anything but whitespace, else `DEFAULT_RUNS_ROOT`.
+    """
+    env = os.environ if env is None else env
+    return (
+        Path(configured)
+        if (configured := env.get(RUNS_DIR_ENV_VAR, "").strip())
+        else DEFAULT_RUNS_ROOT
+    )
 
 
 def next_run_dir(
@@ -76,14 +100,14 @@ def next_run_dir(
         target: The registered target name.
         stakes: The stake ids the run was filtered to, or empty for the whole suite.
         label: Optional human tag appended to the name.
-        root: Where runs live. Defaults to `RUNS_ROOT`.
+        root: Where runs live. Defaults to `runs_root()`.
 
     Returns:
         The created directory, `NNNN-<target>-<what was attacked>[-<label>]`. One stake is
         named; several are counted, because five stake ids joined together make a path no
         one can read and some filesystems will not take. The full list is in `run.json`.
     """
-    root = RUNS_ROOT if root is None else root
+    root = runs_root() if root is None else root
     root.mkdir(parents=True, exist_ok=True)
     if not stakes:
         described = "full-suite"
