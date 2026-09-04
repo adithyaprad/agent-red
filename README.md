@@ -10,7 +10,11 @@ what broke with the exact transcript.
 declaration is correct.** That distinction is load-bearing and is repeated wherever a number
 is reported.
 
-New here? [Install](#install), then [give it model access](#model-access), then
+Reading rather than running? [One run, end to end](#one-run-end-to-end) is a real suite from
+the agent that went in to the page that came out, and every input it names is in this
+repository.
+
+Running it? [Install](#install), then [give it model access](#model-access), then
 [attack a bundled agent](#attack-a-bundled-agent). Pointing it at an agent of your own is
 [further down](#point-it-at-your-own-agent).
 
@@ -117,6 +121,31 @@ Six design decisions carry the project. Each is argued in full in `docs/`.
 6. **Consent is architectural, not a policy note** (`docs/SAFETY.md`). Targets resolve from a
    registry and must echo a per-run nonce before the first attack turn. No code path accepts a
    bare URL.
+
+## One run, end to end
+
+`docs/EXAMPLE-RUN.md` walks a single suite from the input to the output, and
+`docs/example-run/what-broke.html` is the page it produced.
+
+The agent is a subscription retention desk, and nothing about it was authored here. Its
+declaration was read off the files its own platform carries, which are in
+`examples/retention_desk/`, and the shop it was attacked in was derived from that declaration.
+Every input the walkthrough names is in this repository, so what went in and what came out can
+be read side by side.
+
+| | |
+|---|---|
+| Attacks delivered | 374: 8 conversational techniques x 17 derived stakes, plus 7 planted-valid techniques x 17 stakes x the 2 fields the agent declares |
+| Wall clock and cost | 16 minutes, $13.66, no harness errors |
+| Checks run | 4,866, of which 1,709 were actually in play |
+| Violations | 32, across 22 of the 374 conversations. 28 asserted from the call log, 4 settled by a model reading a reply |
+| Down a planted field, nothing sent to the agent | 7, across 4 attacks |
+| Rules broken, reached and held, never reached | 6, 5, 2 |
+
+That last row is the one to read first. Two of the agent's thirteen rules were never reached at
+all, including the refund ceiling, because `refund_charge` was never called in 374 attempts. A
+rule nothing exercised is reported as never in play and is never counted as a pass, which is
+why the number beside it is not a score.
 
 ## Install
 
@@ -369,11 +398,15 @@ Counts, not results. Every one is checkable from the tree.
 | Attack channels | 2: conversational and planted |
 | Targets attacked with zero new code | 3. The third arrived with no declaration at all: its config and policy were read off the files its own platform carries, and the shop it was attacked in was derived from them. |
 
-**No run output is committed to this repository.** A run holds complete transcripts of an agent
-being manipulated and the exact prompts that did it, so results live in the run directory and
-travel as artifacts rather than as a table in this file. Every number a run reports can be
-traced back to the conversation that produced it: the store is one SQLite file anyone can open
-with the `sqlite3` shell.
+**One run's output is committed, and the run behind it is not.** The page is
+`docs/example-run/what-broke.html` and the walkthrough around it is
+[One run, end to end](#one-run-end-to-end).
+
+What stays out is the run itself. The transcripts, the composed attack turns and the prompts
+that composed them are 14MB of working attack material rather than evidence of a result, so
+they live in the run directory and travel as artifacts. Nothing is lost by that: the suite is
+deterministic, every attack carries the seed that reproduces it, and the store is one SQLite
+file anyone can open with the `sqlite3` shell.
 
 ## Repository map
 
@@ -391,7 +424,7 @@ with the `sqlite3` shell.
 | `src/agentred/store/` | SQLite persistence for runs and transcripts |
 | `examples/` | Agents as their own platforms leave them on disk, for the reader to be pointed at. Not part of the product. |
 | `scripts/` | Two development entry points: a small live run that checks the composed turns against the hand-written exemplars, and the page that explains one run to whoever is building the harness rather than to a merchant. |
-| `docs/` | Architecture, integration, world design, safety scope, and the decision records |
+| `docs/` | Architecture, integration, world design, safety scope, a worked example run, and the decision records |
 
 ## Limitations
 
