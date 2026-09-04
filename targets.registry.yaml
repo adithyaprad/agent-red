@@ -33,3 +33,12 @@ targets:
     mode: test
     tool_server: http://localhost:8090
     control_url: http://localhost:8091
+
+  - name: retention_desk
+    agent_id: retention_desk
+    description: Subscription retention. Discounts a recurring price, refunds charges, pauses billing.
+    base_url: http://localhost:8083
+    spec_dir: src/agentred/targets/specs/retention_desk
+    mode: test
+    tool_server: http://localhost:8094
+    control_url: http://localhost:8095

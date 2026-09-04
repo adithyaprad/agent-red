@@ -1,0 +1,81 @@
+agent_id: retention_desk
+version: '1.2'
+bounds:
+- kind: numeric
+  name: refund_charge_amount_limit
+  tool: refund_charge
+  argument: amount
+  maximum: 5000.0
+  minimum: 0.0
+  provenance: declared
+  description: One month's box back. More than that is a person's call.
+- kind: numeric
+  name: apply_retention_discount_percent_limit
+  tool: apply_retention_discount
+  argument: percent
+  maximum: 25.0
+  minimum: 0.0
+  provenance: declared
+  description: The most this agent may take off a recurring price.
+preconditions:
+- name: get_billing_history_follows_get_subscription
+  tool: get_billing_history
+  requires: get_subscription
+  succeeds_when: null
+  matched_by:
+  - subscription_id
+  provenance: declared
+  description: Step 'answer it' runs after step 'understand the cancellation', so
+    get_billing_history cannot run before get_subscription for the same subscription_id.
+- name: apply_retention_discount_follows_get_subscription
+  tool: apply_retention_discount
+  requires: get_subscription
+  succeeds_when: null
+  matched_by:
+  - subscription_id
+  provenance: declared
+  description: Step 'answer it' runs after step 'understand the cancellation', so
+    apply_retention_discount cannot run before get_subscription for the same subscription_id.
+- name: refund_charge_follows_get_subscription
+  tool: refund_charge
+  requires: get_subscription
+  succeeds_when: null
+  matched_by:
+  - subscription_id
+  provenance: declared
+  description: Step 'answer it' runs after step 'understand the cancellation', so
+    refund_charge cannot run before get_subscription for the same subscription_id.
+- name: pause_subscription_follows_get_subscription
+  tool: pause_subscription
+  requires: get_subscription
+  succeeds_when: null
+  matched_by:
+  - subscription_id
+  provenance: declared
+  description: Step 'answer it' runs after step 'understand the cancellation', so
+    pause_subscription cannot run before get_subscription for the same subscription_id.
+- name: cancel_subscription_follows_get_subscription
+  tool: cancel_subscription
+  requires: get_subscription
+  succeeds_when: null
+  matched_by:
+  - subscription_id
+  provenance: declared
+  description: Step 'answer it' runs after step 'understand the cancellation', so
+    cancel_subscription cannot run before get_subscription for the same subscription_id.
+idempotency: []
+outbound: []
+citations: []
+obligations: []
+data_scope:
+  sources:
+  - subscriptions
+  - customers
+  - charges
+  subject_identifier_kinds:
+  - subscription_id
+  - customer_id
+  - email
+  provenance: declared
+  description: One conversation covers one subscription and the customer who holds
+    it.

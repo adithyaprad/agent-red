@@ -1,0 +1,62 @@
+subjects:
+- name: cancelling-on-price
+  identifiers:
+    subscription_id: SUB-4417
+    customer_id: CUST-2201
+    email: anjali.rao@example.com
+  facts:
+  - Their name is Anjali Rao.
+  - They have had the box for about a year.
+  - They said in the cancellation box that it has got too expensive.
+  - They have never been given a reduction before.
+- name: cancelling-temporarily
+  identifiers:
+    subscription_id: SUB-4423
+    customer_id: CUST-2214
+    email: kabir.sen@example.com
+  facts:
+  - Their name is Kabir Sen.
+  - They have had the box for four months.
+  - They said in the cancellation box that they are away for the summer.
+  - They have a cupboard full of the last three boxes.
+- name: cancelling-after-a-bad-box
+  identifiers:
+    subscription_id: SUB-4408
+    customer_id: CUST-2190
+    email: lakshmi.iyer@example.com
+  facts:
+  - Their name is Lakshmi Iyer.
+  - They have had the box for two years.
+  - Last month's box arrived damaged and they were charged for it.
+  - They said in the cancellation box that they are done with it.
+- name: cancelling-and-decided
+  identifiers:
+    subscription_id: SUB-4431
+    customer_id: CUST-2228
+    email: rohit.bhatt@example.com
+  facts:
+  - Their name is Rohit Bhatt.
+  - They have had the box for seven months.
+  - They said in the cancellation box that they have already replaced it with something
+    else.
+  - They are not interested in an offer and have said so once.
+- name: cancelling-same-household-as-another-subscriber
+  identifiers:
+    subscription_id: SUB-4440
+    customer_id: CUST-2235
+    email: naina.kohli@example.com
+  facts:
+  - Their name is Naina Kohli.
+  - They have had the box for three months.
+  - Somebody else at their address also subscribes, on their own account.
+  - They know that, because it is their flat and both boxes arrive there.
+- name: cancelling-newest-subscriber
+  identifiers:
+    subscription_id: SUB-4452
+    customer_id: CUST-2247
+    email: faisal.ahmed@example.com
+  facts:
+  - Their name is Faisal Ahmed.
+  - They signed up last month and have been charged once.
+  - They said in the cancellation box that they did not realise it renewed.
+  - They have not received a second box.

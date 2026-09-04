@@ -168,15 +168,28 @@ directory.
 
 Pointing it at an agent nobody here has seen starts one step earlier, from the sources that
 agent's own platform already carries rather than from a declaration somebody wrote for the
-harness:
+harness. `examples/retention_desk/` is one such agent, as an install wizard leaves it on disk:
+a manifest, a connector advertising the merchant's tools, the limits an operator typed into a
+form, the prose the skill runs on, and the workflow the installer mapped it onto. Neither half
+of a declaration is in that directory, because both halves are what agent-red produces from it.
 
 ```bash
-uv run agentred read --manifest agent.manifest.yaml   # what nothing answers
-uv run agentred read --manifest agent.manifest.yaml --out spec/
+uv run python examples/retention_desk/connector.py &      # the merchant's tools, over MCP
+
+uv run agentred read --manifest examples/retention_desk/agent.manifest.yaml
+uv run agentred read \
+  --manifest examples/retention_desk/agent.manifest.yaml \
+  --answers examples/retention_desk/answers.yaml \
+  --deployment examples/retention_desk/deployment.yaml \
+  --subjects examples/retention_desk/subjects.yaml \
+  --out src/agentred/targets/specs/retention_desk
 ```
 
-Writing is refused while any question is unanswered, and the unanswered list names the subject
-and the question for each. See `docs/INTEGRATION.md`.
+The first command reads and writes nothing. It reports what came back, what nobody looked at,
+and what nothing answered, and writing a declaration is refused while any question is
+outstanding. The three files the second command adds are the answers to exactly those
+questions, kept in files rather than prompted for so that a read reproduces and so what a
+person supplied sits beside what a reader recovered. See `docs/INTEGRATION.md`.
 
 The later stages are also available on their own, because runs are stored before anything is
 judged, so an analysis interrupted halfway is resumed without re-running them:
@@ -208,6 +221,7 @@ uv run ruff check .
 | `src/agentred/judge/` | Deterministic detectors, and the model judge for what they cannot settle |
 | `src/agentred/scoring/` | Rule ledger, exposure model, coverage grid, the pages a person reads |
 | `src/agentred/store/` | SQLite persistence for runs, transcripts and verdicts |
+| `examples/` | Agents as their own platforms leave them on disk, for the reader to be pointed at. Not part of the product. |
 | `docs/` | Architecture, integration, safety scope, and the decision records |
 
 ## Limitations
