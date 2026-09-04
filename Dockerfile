@@ -1,5 +1,6 @@
-# One image, two targets. Which agent it serves is a command argument, so the two containers
-# in docker-compose.yml differ only by their spec directory and their port.
+# One image, every process. Which agent it serves, or whether it serves the tool server
+# instead, is a command argument, so the containers in docker-compose.yml differ only by their
+# spec directory, their entrypoint and their ports.
 
 FROM python:3.12-slim
 

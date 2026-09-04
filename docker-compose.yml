@@ -1,5 +1,6 @@
-# The tool server, and the two stand-in merchant agents that reach their tools through it.
+# The tool servers, and the three stand-in merchant agents that reach their tools through them.
 #
+#   export ANTHROPIC_API_KEY=...        # or the AWS variables, see README
 #   docker compose up -d
 #   uv run agentred doctor
 #
@@ -7,9 +8,37 @@
 # at import, and any credential-shaped variable holding a live-mode key stops the process.
 # The ports match targets.registry.yaml, which is the only place agent-red will look.
 #
-# The tool server has two ports and the difference matters. 8090 serves the tools and is what
-# the agents are told about. 8091 is the control face: it reads the recorded call stream and
-# moves worlds, and no agent is ever given its address. See ADR-0005.
+# A tool server has two ports and the difference matters. The first serves the tools and is
+# what the agents are told about. The second is the control face: it reads the recorded call
+# stream and moves worlds, and no agent is ever given its address. See ADR-0005.
+#
+# Two tool servers rather than one. `cart_recovery` and `dispute_handler` share a shop written
+# by hand, so they share a server. `retention_desk` is served a shop derived from its own
+# declaration, and one declaration derives one shop.
+#
+# Credentials are passed through rather than required, because the model route is resolved
+# from whichever of the three sets of variables is present. An unset variable stays unset in
+# the container.
+#
+# Each agent shares its tool server's network namespace (`network_mode: service:...`), which
+# is why their ports are published on the tool server rather than on themselves. It is not a
+# convenience. The target reports the address it will call when it answers the consent
+# challenge, and the runner refuses to attack it unless that address is the one the run reads
+# the record from, because an agent calling tools nobody records produces an empty call stream
+# that reads exactly like an agent that did nothing. Two names for one server would trip that
+# check for a reason that is about Docker rather than about the agent, so the agent is given
+# the same name the operator wrote in targets.registry.yaml and put where that name resolves.
+
+x-model-route: &model-route
+  AGENTRED_LLM_ROUTE: ${AGENTRED_LLM_ROUTE:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+  ANTHROPIC_AWS_WORKSPACE_ID: ${ANTHROPIC_AWS_WORKSPACE_ID:-}
+  AWS_REGION: ${AWS_REGION:-}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
 
 services:
   tools:
@@ -23,6 +52,8 @@ services:
     ports:
       - "8090:8090"
       - "8091:8091"
+      - "8081:8081"
+      - "8082:8082"
     environment:
       AGENTRED_TARGET_MODE: test
     healthcheck:
@@ -31,15 +62,40 @@ services:
       timeout: 3s
       retries: 5
 
+  tools_retention:
+    build: .
+    entrypoint: ["python", "-m", "agentred.mcp.serve"]
+    command:
+      - "--spec"
+      - "src/agentred/targets/specs/retention_desk"
+      - "--generated"
+      - "--port"
+      - "8094"
+      - "--control-port"
+      - "8095"
+    ports:
+      - "8094:8094"
+      - "8095:8095"
+      - "8083:8083"
+    environment:
+      AGENTRED_TARGET_MODE: test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8095/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   cart_recovery:
     build: .
     command: ["--spec", "src/agentred/targets/specs/cart_recovery", "--port", "8081"]
-    ports:
-      - "8081:8081"
+    network_mode: "service:tools"
     environment:
+      <<: *model-route
       AGENTRED_TARGET_MODE: test
-      AGENTRED_TOOL_SERVER_URL: http://tools:8090
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
+      AGENTRED_TOOL_SERVER_URL: http://localhost:8090
+    depends_on:
+      tools:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8081/health')"]
       interval: 10s
@@ -49,14 +105,33 @@ services:
   dispute_handler:
     build: .
     command: ["--spec", "src/agentred/targets/specs/dispute_handler", "--port", "8082"]
-    ports:
-      - "8082:8082"
+    network_mode: "service:tools"
     environment:
+      <<: *model-route
       AGENTRED_TARGET_MODE: test
-      AGENTRED_TOOL_SERVER_URL: http://tools:8090
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY to a test key}
+      AGENTRED_TOOL_SERVER_URL: http://localhost:8090
+    depends_on:
+      tools:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  retention_desk:
+    build: .
+    command: ["--spec", "src/agentred/targets/specs/retention_desk", "--port", "8083"]
+    network_mode: "service:tools_retention"
+    environment:
+      <<: *model-route
+      AGENTRED_TARGET_MODE: test
+      AGENTRED_TOOL_SERVER_URL: http://localhost:8094
+    depends_on:
+      tools_retention:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8083/health')"]
       interval: 10s
       timeout: 3s
       retries: 5
