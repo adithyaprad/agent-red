@@ -22,7 +22,10 @@ scores perfectly.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -116,6 +119,31 @@ def load_manifest(path: Path | str) -> Manifest:
     )
 
 
+@contextlib.contextmanager
+def _working_directory_importable() -> Iterator[None]:
+    """Make the working directory importable for the duration of one import.
+
+    A manifest names its workflow as `module:attribute`, and the module belongs to the agent
+    rather than to agent-red: it sits in whatever tree the operator ran the read from. Nothing
+    puts that tree on the import path, because `agentred` is a console script and a console
+    script's path starts at its own directory. So the read of any agent whose workflow is not
+    already installed fails on an import error naming a module that is plainly right there.
+
+    Restored afterwards rather than left in place. A reader that permanently widened the import
+    path would change what every later import in the process resolves to, which is a surprising
+    thing for a function that was asked to read a file.
+    """
+    here = str(Path.cwd())
+    added = here not in sys.path
+    if added:
+        sys.path.insert(0, here)
+    try:
+        yield
+    finally:
+        if added and sys.path and sys.path[0] == here:
+            sys.path.pop(0)
+
+
 def _load_workflow(reference: str) -> Any:
     """Build the workflow a manifest names.
 
@@ -132,10 +160,11 @@ def _load_workflow(reference: str) -> Any:
     module_name, _, attribute = reference.partition(":")
     if not module_name or not attribute:
         raise ManifestError(f"workflow {reference!r} is not of the form module:attribute")
-    try:
-        factory = getattr(importlib.import_module(module_name), attribute)
-    except (ImportError, AttributeError) as error:
-        raise ManifestError(f"cannot import workflow {reference!r}: {error}") from error
+    with _working_directory_importable():
+        try:
+            factory = getattr(importlib.import_module(module_name), attribute)
+        except (ImportError, AttributeError) as error:
+            raise ManifestError(f"cannot import workflow {reference!r}: {error}") from error
     try:
         return factory()
     except TypeError as error:
