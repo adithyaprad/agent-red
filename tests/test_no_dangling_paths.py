@@ -19,6 +19,7 @@ sentence false. A record that is edited to stay current is no longer a record.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,7 @@ positives, which is how a guard gets switched off."""
 RESOLVED_AGAINST = ("", "src/agentred", "docs")
 """Prefixes a reference may be written relative to, in the order they are tried."""
 
-RUNTIME_ARTIFACTS = frozenset({"data/agentred.db"})
+RUNTIME_ARTIFACTS = frozenset({"data/agentred.db", "out/runs/", "calls.jsonl"})
 """Paths a run creates rather than the repository carrying.
 
 Each one is named here so that adding to this set is a decision rather than an oversight. A
@@ -82,4 +83,59 @@ def test_every_path_a_document_names_exists(document: Path) -> None:
 def test_the_guard_would_notice() -> None:
     """The pattern and the resolver agree on something real and something invented."""
     assert resolves("src/agentred/judge/detectors/")
-    assert not resolves("src/agentred/judge/calibration/")
+    assert not resolves("src/agentred/judge/no_such_package/")
+
+
+ROOTED = re.compile(
+    r"\b((?:docs|src/agentred|examples|data|tests|scripts)/[A-Za-z0-9_./-]*[A-Za-z0-9_/])"
+)
+"""A reference written from the repository root, backticks or not.
+
+The narrow backtick pattern above is right for prose, where most paths are quoted and the
+false positives would be many. It is wrong everywhere else: the three references this guard
+first missed were in a source docstring, a YAML comment and a test, none of them backticked.
+Anything beginning with one of this repository's own top-level directories is a path, in any
+file, in any syntax."""
+
+ADR_DIRECTORY = "docs/DECISIONS"
+"""Exempt for the reason stated at the top of this file: an ADR is a record, not a description
+of the tree as it stands, and the state it argues against is usually a path that is gone."""
+
+
+def tracked_files() -> list[Path]:
+    """Every file git tracks, which is every file a reader of this repository can see."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    return [ROOT / name for name in listed.stdout.split("\0") if name]
+
+
+def rooted_references(path: Path) -> list[tuple[int, str]]:
+    """Every root-relative path `path` names, as line number and reference."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (UnicodeDecodeError, FileNotFoundError):
+        return []
+    return [
+        (number, match.group(1))
+        for number, line in enumerate(lines, 1)
+        for match in ROOTED.finditer(line)
+    ]
+
+
+def test_no_tracked_file_names_a_path_that_does_not_exist() -> None:
+    """A path named anywhere a reader can see resolves, not only one named in prose.
+
+    The narrow guard above covers the documents somebody reads first. This one covers
+    everything else they read next: docstrings, comments in a spec, an example invocation in a
+    script header. A stale path in a docstring costs exactly what a stale path in the README
+    costs, because the reader who follows it has already decided to trust the file.
+    """
+    dangling = [
+        f"{path.relative_to(ROOT)}:{number} names {reference!r}"
+        for path in tracked_files()
+        if ADR_DIRECTORY not in path.as_posix() and path.name != Path(__file__).name
+        for number, reference in rooted_references(path)
+        if not (ROOT / reference).exists() and reference not in RUNTIME_ARTIFACTS
+    ]
+    assert not dangling, "\n".join(["files name paths that do not exist:", *dangling])

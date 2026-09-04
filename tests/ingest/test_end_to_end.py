@@ -146,7 +146,16 @@ async def test_an_answered_package_emits_both_halves_of_a_declaration() -> None:
         recovered_policy=emission.policy,
     )
     assert recovery.faithful, recovery.render()
-    assert len(recovery.of(Verdict.MATCHED)) >= 27
+
+    # docs/INTEGRATION.md prints these four counts as what a read of this agent recovers.
+    # Pinned rather than bounded, because the section around them explains each number: which
+    # rule shapes a form field cannot hold, and which three items are questions rather than
+    # rules. A count that drifts turns that explanation into a wrong one, and the drift is
+    # invisible from the code.
+    assert len(recovery.of(Verdict.MATCHED)) == 32
+    assert len(recovery.of(Verdict.DIVERGED)) == 0
+    assert len(recovery.of(Verdict.UNCOVERED)) == 10
+    assert len(recovery.of(Verdict.ADDED)) == 7
 
 
 async def test_a_source_the_manifest_names_and_cannot_read_is_refused() -> None:

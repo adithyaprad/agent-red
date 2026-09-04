@@ -22,8 +22,26 @@ REGISTRY = Path(__file__).resolve().parents[1] / "targets.registry.yaml"
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "retention_desk"
 
 
+NO_ROUTE = {
+    "AGENTRED_LLM_ROUTE": "",
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "ANTHROPIC_AWS_WORKSPACE_ID": "",
+    "AWS_REGION": "",
+    "AWS_DEFAULT_REGION": "",
+}
+"""Every variable a route resolves from, blanked.
+
+`CliRunner` overlays its `env` on the real environment rather than replacing it, so without
+this a developer who has credentials exported runs a different test than one who does not, and
+the tests about what happens when no route resolves pass only on the machine that cannot run
+the tool. Blank rather than absent because `resolve_route` treats an empty value as unset,
+which is the same thing a shell that never exported it produces.
+"""
+
+
 def run(*arguments: str, env: dict[str, str] | None = None) -> object:
-    return runner.invoke(app, list(arguments), env=env or {})
+    return runner.invoke(app, list(arguments), env={**NO_ROUTE, **(env or {})})
 
 
 def test_doctor_checks_the_shipped_registry_and_specs_offline() -> None:
