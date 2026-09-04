@@ -500,17 +500,22 @@ holding money coming *in* would produce a headline that is a loss and a gain add
 Where two agents are denominated differently the currency symbol is dropped rather than
 guessed, since a bare number is honest and the wrong symbol is not.
 
-**A remedy is a typed thing, and the two kinds are never blended.** A change to the structured
-policy makes a violation unreachable, because the tool surface then refuses the call. A
-sentence added to the instruction text makes it less likely, because the surface is unchanged
-and still accepts the value. Presenting the second as though it were the first is the single
-most damaging thing this tool could do, since the operator stops looking and the thing they
-stopped looking at is still reachable. So which kind a remedy is travels with it rather than
-being left to phrasing, and a finding whose only available answer is a sentence says so and
-says why: the limit that would have closed it is not something the declaration can currently
-express. That is a finding about the platform rather than about the agent, and it is worth
-printing. `docs/DECISIONS/ADR-0003-instruction-vs-permission.md` is the whole argument, and it
-is what makes the prose-versus-policy gap above mean anything.
+**A remedy is a typed thing, and the two kinds may never be blended.** A change to the
+structured policy makes a violation unreachable, because the tool surface then refuses the
+call. A sentence added to the instruction text makes it less likely, because the surface is
+unchanged and still accepts the value. Presenting the second as though it were the first is the
+single most damaging thing this tool could do, since the operator stops looking and the thing
+they stopped looking at is still reachable. So the type is a property a remedy has to carry
+rather than something left to phrasing, and a remedy whose only available form is a sentence
+has to say so and say why: the limit that would have closed it is not something the declaration
+can express. That is a statement about the platform rather than about the agent.
+
+This is why the distinction is drawn where a rule is read rather than where it is written up.
+Which of the two a rule is follows from where it came from, and that provenance travels with it
+from the moment it is read to the moment it reaches a page, so a rule an operator stated in
+prose and never configured is already marked as the weaker kind before anything is measured.
+That is the prose-versus-policy gap above, and it is a finding before any attack runs.
+`docs/DECISIONS/ADR-0003-instruction-vs-permission.md` is the whole argument.
 
 The constraint on what a remedy may be is a product decision, not an implementation one. The
 people who read this report are ops and finance teams on a no-code builder. They cannot apply a
