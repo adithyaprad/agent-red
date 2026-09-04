@@ -189,40 +189,42 @@ opinion about.
 ## Pipeline
 
 ```
- registry + consent gate
-          |
-          v
-  instruction reading  ---- rules stated in the prompt, compared against the declared policy
-          |
-          v
-   attack generator  ---- techniques (YAML) x derived stakes x channels x mutations
-          |
-          +---------------------------+
-          |                           |
-          v                           v
-  conversational channel        planted channel
-  multi-turn driver             restore -> plant -> trigger
-          |                           |
-          +------------+--------------+
-                       |
-                       v
-                 the agent runs
-                       |
-                       v
-          MCP server  ---->  tools over the synthetic world
-                       |
-                       v
-          call stream + world diff        (recorded here, not reported by the agent)
-                       |
-                       v
-   deterministic detectors  <---------------------  policy manifest
-          |
-          | (only the interpretive residue)
-          v
-      LLM judge
-          |
-          v
-   coverage grid + rule ledger  ---->  the page an operator reads
+               registry + consent gate
+                          |
+                          v
+                 instruction reading  <---- rules the prompt states, checked
+                          |                 against the declared policy
+                          v
+                  attack generator  <---- techniques x stakes x channels x mutations
+                          |
+            +-------------+-------------+
+            |                           |
+            v                           v
+ conversational channel          planted channel
+    multi-turn driver      restore -> plant -> trigger
+            |                           |
+            +-------------+-------------+
+                          |
+                          v
+                   the agent runs
+                          |
+                          v
+                     MCP server  ----> tools served over the synthetic world
+                          |
+                          v
+              call stream + world diff  <---- the evidence, recorded here and
+                          |                   never reported by the agent
+                          v
+               deterministic detectors  <---- the policy manifest
+                          |
+                          v
+                      LLM judge  <---- only the interpretive residue
+                          |
+                          v
+             coverage grid + rule ledger
+                          |
+                          v
+             the page an operator reads
 ```
 
 ## Why each stage exists
