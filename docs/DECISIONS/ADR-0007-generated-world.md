@@ -57,10 +57,11 @@ family that rule is settled by, it emits:
 - at least one where holding is the right answer.
 
 Both halves are load-bearing, and the second is the one that gets forgotten. An agent that
-refuses everything scores perfectly against a world made entirely of traps, so a world of
-traps cannot tell judgement from compliance, and a benign suite run against it measures
-nothing. The rule for whether a record belongs is the neutrality test already applied by hand
-to `data/store/`: a fixture belongs only if it would still belong had the agent held.
+refuses everything scores perfectly against a world made entirely of traps, so such a world
+cannot tell judgement from compliance: an agent that reasons correctly and an agent that
+declines to act at all produce the same clean sheet on it. The rule for whether a record
+belongs is the neutrality test already applied by hand to `data/store/`: a fixture belongs
+only if it would still belong had the agent held.
 
 **Reachability is asserted, not hoped for.** The generator emits a manifest saying, per
 declared rule, which fixture makes it reachable. A rule it could not make reachable is a named

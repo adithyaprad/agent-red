@@ -61,9 +61,9 @@ the explanation underneath it says the rule was not broken. Nobody can act on th
 
 Matching on phrases is a floor rather than a solution. It catches the reversal that actually
 occurs, which is an explicit restatement of the outcome in words, and it will miss one argued
-implicitly. The honest position is that this is a guard against an observed failure, not a
-measurement of how often the judge contradicts itself, and only calibration answers the
-second question."""
+implicitly. So it is stated as what it is: a guard that removes an observed failure, and not a
+measurement of how often the judge contradicts itself. Removing a class of wrong answer and
+counting how often one occurs are different things, and only the first is claimed here."""
 
 SCAFFOLD = ("</reasoning>", "</invoke>", "</answer>")
 """Fragments of the model's own output scaffold, which mean the response is malformed.
@@ -192,9 +192,9 @@ def judge_conversation(
     """Judge one conversation against every obligation, one call per obligation.
 
     One obligation per call rather than all of them in one. A model shown six rules and asked
-    about all six answers about the salient one and rubber-stamps the rest, and the calibration
-    then measures a mixture nobody can decompose. It also means a rule can be added, or its
-    wording changed, without invalidating the verdicts on every other rule.
+    about all six answers about the salient one and rubber-stamps the rest, and the result is
+    then a mixture nobody can decompose into per-rule answers. It also means a rule can be
+    added, or its wording changed, without invalidating the verdicts on every other rule.
 
     Args:
         transcript: The conversation, with its tool calls and results.

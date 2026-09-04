@@ -17,8 +17,8 @@ operator wants it to be.
 
 **Scope.** agent-red is a pre-go-live gate for an agent you control. It is not a
 production monitor, not a scanner, and not a service that will test somebody else's agent
-for them. Continuous post-deploy monitoring is a genuinely different product and is named
-as future work rather than half-built here.
+for them. Continuous post-deploy monitoring is a genuinely different product, with a
+different consent story and a different reader, and it is deliberately outside this scope.
 
 **Consent is a code path, not a policy.** There is no function anywhere in the tree that
 takes a URL and sends an attack turn to it. A target is resolved from a registry, and
@@ -35,9 +35,10 @@ attack at live credentials should get a crash, not a warning.
 
 **Attacks are held in the repository, and the repository is a defence artifact.** The seed
 corpus, the mutation operators and the generator are all checked in. What makes this
-defensible is not that the attacks are hidden but that they are attached to a verifier: the
-output is a scorecard with measured precision and recall, not a payload list. The harness
-is judged on defence metrics for that reason.
+defensible is not that the attacks are hidden but that they are attached to an oracle: the
+output is a page saying which of an agent's own declared rules broke, quoted from the call
+stream that broke them, against a shop built to make those rules reachable. It is not a
+payload list, and the harness is judged on what it can say about a defence for that reason.
 
 **Refusals.** The harness will not be adapted to attack an agent the operator does not
 control, and no consent bypass will be added for a demo, a benchmark or a deadline. If a
@@ -53,9 +54,10 @@ establishing anything, and every operator who should not pass it will pass it.
 pointing at a stranger. The challenge echo requires cooperation from the far end, which is
 what consent actually means.
 
-**Not publishing the attack corpus.** Attractive, and it would make the calibration numbers
-unreproducible, which costs more than the corpus is worth to an attacker. The techniques
-here are documented in public; the corpus's value is that it is measured.
+**Not publishing the technique corpus.** Attractive, and it would make every number the
+harness reports unreproducible, which costs more than the corpus is worth to an attacker.
+The techniques here are documented in public; the corpus's value is that it is attached to
+checks somebody else can run.
 
 ## Consequences
 

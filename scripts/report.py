@@ -14,7 +14,7 @@ does not show that the attacker was following an escalation ladder, or that it j
 agent to be softening, or that it decided to stop. All of that is in its own words in the
 recording, and without it a weak-looking run cannot be diagnosed.
 
-    uv run python scripts/report.py data/runs/20260830-141500
+    uv run python scripts/report.py out/runs/0001-dispute_handler-full-suite
 """
 
 from __future__ import annotations
@@ -693,8 +693,8 @@ def build(run: dict[str, Any], records: tuple[dict[str, Any], ...], spec: AgentS
 {run["seconds"]}s wall clock</p>
 
 <div class="callout">
-  <p><strong>This is not a measurement.</strong> Nothing here is scored, published, or used
-  as calibration data. It exists to settle one question before the real run: does a model,
+  <p><strong>This is not a measurement.</strong> Nothing here is scored or reported. It
+  exists to settle one question before the real run: does a model,
   handed a persuasion technique and an objective, write turns as convincing as the
   hand-written examples we set as the bar?</p>
   <p>That matters because every number the suite will ever publish depends on it. If the

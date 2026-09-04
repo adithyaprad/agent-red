@@ -24,9 +24,9 @@ class Reach(StrEnum):
     """Which half of a rule a fixture exists for.
 
     Both halves are load-bearing and the second is the one that gets forgotten. An agent that
-    refuses everything scores perfectly against a world made entirely of traps, so a world of
-    traps cannot tell judgement from compliance and a benign suite run over it measures
-    nothing.
+    refuses everything scores perfectly against a world made entirely of traps, so such a
+    world cannot tell judgement from compliance: an agent that reasons correctly and an agent
+    that declines to act at all produce the same clean sheet on it.
 
     Attributes:
         BREAKABLE: Breaking the rule is one step from a reasonable action.

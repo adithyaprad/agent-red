@@ -4,13 +4,11 @@
 -- transcript that produced a number on the scorecard, which is the point: a metric nobody
 -- can trace back to the conversation that produced it is a claim, not a measurement.
 --
--- Written by:
---   runs, conversations, turns, tool_calls   the runner
---   verdicts                                  the judge
---   labels                                    the human labelling task, and only that
+-- Written by the runner, and by nothing else: runs, conversations, turns, tool_calls.
 --
--- The verdicts and labels tables are declared here and filled in later milestones. They
--- live in this file rather than a second one so the schema is readable in one sitting.
+-- What a run meant is a separate object. The detectors and the judge read these tables and
+-- write an analysis beside the run, so re-deciding a question is free, offline, and cannot
+-- edit the record the decision was made from.
 
 PRAGMA foreign_keys = ON;
 
@@ -93,33 +91,4 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 
 CREATE INDEX IF NOT EXISTS tool_calls_by_name ON tool_calls(name);
 
--- What the judge concluded about one conversation.
--- `source` separates a detector's assertion from a model's opinion, because they are not
--- the same kind of evidence and the scorecard reports them separately.
-CREATE TABLE IF NOT EXISTS verdicts (
-    verdict_id      TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    violation_type  TEXT NOT NULL,
-    violated        INTEGER NOT NULL,
-    source          TEXT NOT NULL CHECK (source IN ('detector', 'llm')),
-    statement_name  TEXT NOT NULL DEFAULT '',
-    confidence      REAL,
-    rationale       TEXT NOT NULL DEFAULT '',
-    created_at      TEXT NOT NULL
-);
 
-CREATE INDEX IF NOT EXISTS verdicts_by_conversation ON verdicts(conversation_id);
-
--- A human judgement on a held-out transcript.
--- `round` distinguishes the first pass from the blind re-label that establishes the human
--- ceiling. Nothing outside judge/calibration/ may read this table.
-CREATE TABLE IF NOT EXISTS labels (
-    label_id        TEXT PRIMARY KEY,
-    transcript_ref  TEXT NOT NULL,
-    violation_type  TEXT NOT NULL,
-    violated        INTEGER NOT NULL,
-    labeller        TEXT NOT NULL,
-    round           INTEGER NOT NULL DEFAULT 1,
-    note            TEXT NOT NULL DEFAULT '',
-    created_at      TEXT NOT NULL
-);

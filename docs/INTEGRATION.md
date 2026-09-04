@@ -31,9 +31,9 @@ already recorded almost all of it, in five places, for its own reasons.
 | Source | Supplies | Origin |
 |---|---|---|
 | Tool connectors | tools, argument schemas | declared |
-| Instance configuration | bounds: limits, thresholds, approval points | declared |
+| Instance configuration | bounds: limits, thresholds, approval points. Also the data sources this instance was granted, and the identifiers one session is scoped to | declared |
 | Workflow definition | preconditions: which step must precede which | declared |
-| Catalogue manifest | data sources, data scope, connectors, trigger | declared |
+| Catalogue manifest | which connectors the agent is wired to, which model it runs, and where the other three are | declared |
 | Instructions | whatever the four above have no field for | inferred |
 
 One part of a spec is not on that list and never will be. **Subjects, the identities the
@@ -98,11 +98,18 @@ worked around.
 
 ### Catalogue manifest
 
-The manifest an agent is installed from names the connectors it requires, the data it is
-allowed to reach, and the entry point that starts it. Those map onto data sources, the data
-scope one session may touch, and the trigger: an agent that wakes on a schedule and an agent
-that runs when a request names a record are attacked down different paths, and which one it is
-comes from the manifest rather than from a guess.
+The manifest an agent is installed from is the entry point rather than a source of rules. It
+names the connectors the agent is wired to, the model it runs, and where the other three
+sources are on disk, which is what lets a read start from one file and find the rest without
+being told. `examples/retention_desk/agent.manifest.yaml` is seven lines and every one of them
+exists because the agent needs it to run.
+
+What it does not carry is worth stating, because the obvious assumption is that it does. It
+does not say what data the agent may reach or what one session is scoped to: those are per
+instance, so they come from the instance configuration's own record of the sources that
+instance was granted. And it does not say which fields a stranger writes into or which trigger
+reads them. That is a property of the deployment rather than of the platform's records, so it
+is asked for rather than recovered, which is the third question in the section below.
 
 ### Instructions
 
@@ -112,9 +119,9 @@ argument, both of which are checked against the agent's declared surface. A rule
 something that does not exist is refused rather than reported, because a model inventing a rule
 and a model then finding it broken is the failure this whole path invites.
 
-The residue is small and it is not incidental. Both agents built here were written by people
-who knew exactly what they were building, and both ended up with rules in their instructions
-that never reached their policy. A rule stated in prose and never configured is a finding
+The residue is small and it is not incidental. The two agents written here were written by
+people who knew exactly what they were building, and both ended up with rules in their
+instructions that never reached their policy. A rule stated in prose and never configured is a finding
 before any attack runs, because nothing in the deployment enforces it.
 
 ## What is not readable, and is asked rather than assumed
@@ -145,9 +152,10 @@ and nothing in that directory was written for agent-red. It is the shortest way 
 this document describes actually run: serve the connector, read the agent, and watch the read
 refuse to write a declaration until the questions it raises are answered.
 
-Its `README.md` carries the commands. The four files an operator supplies alongside it are the
-answers themselves, kept in files rather than prompted for, so that a read reproduces and what
-a person confirmed sits beside what a reader recovered.
+Its `README.md` carries the commands. The three files an operator supplies alongside it are
+the answers themselves, one per question in the section above, kept in files rather than
+prompted for, so that a read reproduces and what a person confirmed sits beside what a reader
+recovered.
 
 ## What this recovers, measured
 
@@ -158,20 +166,30 @@ workflow an installer mapped it onto. None of those four files were written for 
 Reading them and comparing the result against the authored declaration gives this.
 
 ```
-dispute_handler: 32 matched, 0 diverged, 9 not covered by any reader that ran,
+dispute_handler: 32 matched, 0 diverged, 10 not covered by any reader that ran,
                  7 found that the author did not declare
 ```
 
-Every tool, every argument schema and every description came back identical. Five of the
-fifteen authored rules came back, and none of the fifteen came back differently.
+Twenty-seven of the matches are the tool surface: every tool, every argument schema and every
+description came back identical. The other five are rules. Nothing came back differently,
+which is the number that would matter most if it were not zero: a reader that recovered a
+ceiling of the wrong value would be worse than one that recovered nothing.
 
 **What did not come back is the interesting half, and it was predicted before it was
-measured.** The instance reader names, on every read, the three rule shapes a form field
-structurally cannot hold. The seven rules it missed are those shapes and nothing else: a limit
-relative to another value, a limit on a running total, a limit whose value is read from the
-record rather than passed in, a replay rule about a pair of calls, and the two rules about
-what a reply may carry. An agent bounded only by per-call ceilings looks bounded, which is why
-that list is printed beside the recovered policy rather than inferred from its absence.
+measured.** Seven of the agent's twelve authored rules are missing, and they are missing by
+shape rather than by accident. The instance reader names, on every read, the rule shapes a form
+field structurally cannot hold, and the seven are exactly those: a limit relative to another
+value, a limit on a running total, a limit whose value is read from the record being acted on
+rather than passed in, a rule that the money goes back in the currency it came in, a replay
+rule about a pair of calls, and the two rules about what a reply may carry. An agent bounded
+only by per-call ceilings looks bounded, which is why that list is printed beside the recovered
+policy rather than left to be inferred from its absence.
+
+The three remaining items are not rules at all, and they are the questions the section above
+says are asked rather than assumed: which fields a stranger writes and what trigger reads them,
+what each tool does to the merchant's records, and who the harness may act as. They appear in
+the same list as the missing rules on purpose, because a read that quietly omitted them would
+produce a declaration that looks complete.
 
 **Seven rules came back that the author never declared.** The workflow requires orderings
 nobody wrote down: the settling step runs after the step that reads the consignment, so a
@@ -205,13 +223,14 @@ as one would overstate the weakest.
 
 | Given | What a report may say |
 |---|---|
-| Instance configuration and manifest | conformance to a declaration, in full |
-| Manifest only | conformance, with the drafted half's provenance shown per rule |
-| An endpoint | what broke, and nothing about coverage |
+| Instance configuration, workflow and manifest | conformance to a declaration, in full |
+| Manifest and prose only | conformance, with the drafted half's provenance shown per rule |
 
-The third is not a lesser version of the first. It is what an attacker has, and running the
-same corpus at all three says what internal knowledge is worth in findings rather than
-asserting that it is worth something.
+The second is not a weaker report so much as a differently marked one. Every rule carries where
+it came from from the moment it is read to the moment it appears on a page, so a reader can see
+which half of a result rests on a structured field somebody configured and which rests on a
+model reading a sentence. Collapsing the two would make the second look like the first, which
+is the one outcome the provenance column exists to prevent.
 
 ## Adding a platform
 

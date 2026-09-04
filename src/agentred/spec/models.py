@@ -1788,8 +1788,10 @@ class AgentSpec(BaseModel):
         """Consequential tools no declared rule of any kind constrains.
 
         These are where the only thing standing between a customer and the merchant's money
-        is the wording of a system prompt. `patch/` must answer these with a `permission`
-        remedy and must not offer an `instruction` remedy as an equivalent.
+        is the wording of a system prompt. A remedy for one of these has to be a structural
+        change to what the tool surface accepts, never a rewording of the prompt offered as
+        an equivalent, which is
+        `docs/DECISIONS/ADR-0003-instruction-vs-permission.md`.
 
         Every policy section counts, not only bounds and preconditions. A tool covered by an
         idempotency requirement, an outbound rule or a citation requirement has something a

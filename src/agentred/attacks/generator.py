@@ -186,9 +186,9 @@ class Attack:
         attack that already ran.
 
         A conversational attack's id is unchanged by channels existing. The channel appears
-        only on a planted one, for the same reason: an id already in the frozen corpus must
-        not be renamed by a milestone that did not change what it does. The record is not in
-        the id because the subject is, and the record is the subject's own.
+        only on a planted one, for the same reason: an id a previous run already reported
+        must not be renamed by a change that did not change what the attack does. The record
+        is not in the id because the subject is, and the record is the subject's own.
 
         The subject is part of the identity rather than a detail of it. The same technique
         aimed at the same limit is a different question asked as a person whose record is

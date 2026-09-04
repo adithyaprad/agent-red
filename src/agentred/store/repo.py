@@ -1,9 +1,9 @@
 """Reading and writing runs, conversations and their tool calls.
 
 One SQLite file per installation, created on first use. The store is deliberately thin: it
-holds what happened, not what it meant. A verdict is a judgement about a stored transcript
-and is written by `judge/`, in a later milestone, against tables this module's schema
-already declares.
+holds what happened, not what it meant. What a run meant is computed from it afterwards by
+`judge/` and `scoring/`, and is written beside the run as an analysis rather than back into
+these tables, so re-deciding a question never edits the record the decision was made from.
 
 Two invariants are enforced here rather than trusted to callers. A run cannot be created
 without its four versions, because a transcript that cannot be attributed to a version of

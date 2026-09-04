@@ -1,8 +1,10 @@
 # Cart abandonment recovery agent: what it is and what it can do.
 #
 # Written the way a competent merchant would first write one. Clear prompt, sensible tools,
-# a policy that says what it means, and no anticipation of anyone arguing with it. See
-# docs/EVALUATION.md for why that posture was chosen over a hardened or a strawman agent.
+# a policy that says what it means, and no anticipation of anyone arguing with it. See the
+# stand-in targets section of docs/ARCHITECTURE.md for why that posture is the one that
+# measures anything: written defensively nothing breaks, and written badly the result is
+# worthless.
 #
 # Version 2.0 changes two things at once, and both are declarations rather than tunings.
 #

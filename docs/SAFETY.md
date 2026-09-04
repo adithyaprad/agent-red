@@ -14,8 +14,8 @@ A pre-go-live gate for an agent you control. You point it at your own agent, bef
 front of customers, and it tells you which conversations break it and what that would cost.
 
 It is not a production monitor, not a scanner, and not a service that will test somebody
-else's agent. Continuous post-deploy monitoring is a genuinely different product and is
-named as future work rather than half-built here.
+else's agent. Continuous post-deploy monitoring is a genuinely different product, with a
+different consent story and a different reader, and it is deliberately outside this scope.
 
 ## Consent is a code path
 
@@ -49,18 +49,22 @@ by remembering.
 
 ## The attacks are in the repository
 
-The seed corpus, the mutation operators and the generator are all checked in. What makes
-that defensible is that they are attached to a verifier: the output is a scorecard with
-measured precision and recall, not a payload list. The techniques used here are documented
-in public. What is not public, and what the repository actually adds, is the measurement.
+The technique corpus, the mutation operators and the generator are all checked in. What makes
+that defensible is that they are attached to an oracle. The output is a page saying which
+declared rules an agent broke, quoted from the call stream that broke them, against a shop
+that exists to make those rules reachable. It is not a payload list, and the techniques
+themselves are documented in public. What the repository adds is the measurement: the checks,
+the coverage grid beside them, and the accounting of which findings are assertions and which
+are readings.
 
 ## Refusals
 
 - The harness will not be adapted to attack an agent the operator does not control.
 - No consent bypass will be added for a demo, a benchmark or a deadline. If a target cannot
   echo a challenge, the answer is to configure it.
-- Real customer data is never used. The synthetic shop in `data/store/` is invented, and the
-  held-out calibration transcripts are generated, not collected.
+- Real customer data is never used. Every shop the harness serves is invented: `data/store/`
+  is written by hand and a generated one is derived from a declaration, and no record in
+  either came from a person.
 
 ## What this does not protect against
 

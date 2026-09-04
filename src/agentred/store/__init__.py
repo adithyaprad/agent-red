@@ -1,4 +1,4 @@
-"""SQLite persistence for runs, transcripts, verdicts and labels."""
+"""SQLite persistence for runs, transcripts and the tool calls they produced."""
 
 from agentred.store.repo import DEFAULT_DB_PATH, SCHEMA_PATH, Store, StoreError, new_id
 

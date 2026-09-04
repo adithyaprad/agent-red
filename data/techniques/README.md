@@ -58,7 +58,7 @@ Required on a technique valid on `planted`, under `planted:`:
 
 ## What the exemplars are for
 
-They are not templates and are never sent verbatim. They are the calibration sample shown to
+They are not templates and are never sent verbatim. They are the reference sample shown to
 the attacker model, because "be persuasive" produces a different bar in every run and a written
 example does not. They are deliberately written against an abstract stake, so that reusing them
 against a real agent requires composing rather than copying.

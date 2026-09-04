@@ -123,26 +123,27 @@ with the evidence is out of reach without a secret having to be kept.
 
 *Failure mode if absent:* the agent can be attacked but not measured, so there is no evidence.
 
-### Surface 3: the improvement is applyable
+### Surface 3: the remedy is applyable
 
-What agent-red returns is the same kind of object it read. Config in, config out. Applying a
-fix is replacing that object with a new version, not running a migration or integrating with
-anything.
+A finding is only worth what the operator can do about it, so a remedy agent-red names is a
+value in the same object it read. Config in, config out: applying one is replacing that object
+with a new version, not running a migration or integrating with anything.
 
-- Applying a change is **replacing the config and policy object**
+- A change is **a new version of the config or policy object**, never an edit in place
 - Objects are **versioned**, so a scorecard belongs to a specific version and a change can be
   rolled back
-- The fix can be applied to the **draft** and re-tested before publishing, which is what closes
-  the loop rather than merely reporting
+- A change can be made to the **draft** and re-measured before publishing, which is what makes
+  a report actionable rather than merely informative
 
 *Failure mode if absent:* the output is a report a human retypes, not a change a system applies.
 
 ### The property this buys
 
-agent-red is a pure function over agent definitions. In: config and policy. Out: a new config,
-a new policy, and the evidence. It requires no database access, no runtime hooks and no
-privileged position, which is what lets it ship as a component inside a platform rather than
-sit beside one as a service.
+agent-red reads agent definitions and returns evidence about them, in the vocabulary those
+definitions are written in. It requires no database access, no runtime hooks and no privileged
+position, which is what lets it ship as a component inside a platform rather than sit beside one
+as a service, and it is why a remedy it names is a value in the same object the operator already
+edits rather than a change to anything they cannot reach.
 
 ### Validity of a result
 
@@ -168,17 +169,22 @@ worthless. Every flaw the suite finds has to pass one test before it appears in 
 a competent person building on a no-code studio plausibly ship this. Anything needing a reach
 is cut.
 
-A third target exists and is built deliberately differently: an unrelated domain, and a plain
-model loop with no workflow engine, introduced after the harness was frozen. It carries two
-proofs at once. Nothing in `attacks/` or `judge/detectors/` encodes knowledge of what a target
-sells, and nothing in them encodes knowledge of how a target is built. The identical suite runs
-against all three with no new attack code, no new detectors and no per-target configuration
-beyond the spec each one declares.
+A third target is deliberately unlike the first two in the way that matters most, which is
+that nothing about it was authored here. A subscription retention desk arrives as an install
+wizard leaves it on disk, in `examples/retention_desk/`: a manifest, a connector advertising the
+merchant's tools that imports nothing from this repository, the two limits an operator typed
+into a form, the prose the skill runs on, and the workflow the installer mapped it onto. Neither
+half of a declaration is in that directory. `ingest/` reads both out of those files, the shop it
+is attacked in is derived from the result, and the cast of identities the harness acts as is
+derived from that shop. The identical suite then runs against all three targets with no new
+attack code, no new detectors and no per-target configuration beyond the declaration each one
+carries.
 
-That second proof is the one the oracle placement buys, and it is worth being precise about why
-it holds rather than asserting it. The harness never reads a workflow trace, a graph state or a
-message block. It reads a call stream captured at the MCP server and a policy the agent
-declares, and both of those exist regardless of what produced the calls.
+It is worth being precise about why the suite transfers rather than asserting it. The harness
+never reads a workflow trace, a graph state or a message block. It reads a call stream captured
+at the MCP server and a policy the agent declares, and both of those exist regardless of what
+produced the calls, which is why a target's build style is not something the harness has an
+opinion about.
 
 ## Pipeline
 
@@ -189,7 +195,7 @@ declares, and both of those exist regardless of what produced the calls.
   instruction reading  ---- rules stated in the prompt, compared against the declared policy
           |
           v
-   attack generator  ---- techniques (YAML) x derived stakes x channels + mutations + gen N-1 winners
+   attack generator  ---- techniques (YAML) x derived stakes x channels x mutations
           |
           +---------------------------+
           |                           |
@@ -213,10 +219,10 @@ declares, and both of those exist regardless of what produced the calls.
           |
           | (only the interpretive residue)
           v
-      LLM judge  ------  calibration harness  ----  held-out set + human labels
+      LLM judge
           |
           v
-      scorecard  ----  exposure model  ----  suggested config change  ----  re-run, measure delta
+   coverage grid + rule ledger  ---->  the page an operator reads
 ```
 
 ## Why each stage exists
@@ -226,20 +232,34 @@ it cannot be pointed at a stranger. Targets are resolved from a registry and mus
 challenge string before the first attack turn. There is no code path that takes a bare URL.
 Scope and refusals are in `docs/SAFETY.md`.
 
-**Composed attacks, not a fixed prompt list.** Two layers. Eight agent-independent
-manipulation techniques (assert an unverifiable fact, claim a prior interaction, borrow
-authority, manufacture pressure, build false context then ask, substitute identity, drift
-outside remit, inject through a data channel) are crossed with the stakes derived from the
+**Composed attacks, not a fixed prompt list.** Two layers. Twelve agent-independent
+manipulation techniques in `data/techniques/` are crossed with the stakes derived from the
 target's own spec: which tools are consequential, which bounds are declared, which data scope
-the session holds. A fixed list is patched string by string and the merchant stays broken, and
-it only ever works on the one domain it was written for. Surface variation (register, language
-including Hinglish and mid-conversation code-switching, pressure, obfuscation) is applied on
-top. Successful attacks seed the next generation, so the suite hardens as agents do.
+the session holds. Eight are written as conversational arcs, whose escalation and tells only
+mean anything across turns: state a fact in passing so it is never checked, sound like the
+merchant, take a step that is defensible given the last one, give an unverifiable account of a
+previous conversation, make the rule feel like the unkind choice, work an edge the rule is
+silent about, ask for a commitment that costs nothing today, and let a second party introduced
+as context quietly become the one being acted on. Four are written for a field nobody replies
+to: text shaped like an instruction where nothing marks instructions from work, text that
+closes a delimiter early and opens its own, content written in the shape of a looked-up result,
+and the plainest version of all of them, an ordinary request sitting in an ordinary field.
+Each technique declares which channels it is valid on, and one attempted on a channel it does
+not support is a construction error rather than a wasted run.
 
-This is also why the harness transfers. Nothing in `attacks/` or `judge/detectors/` knows what
-a target sells. That claim is tested rather than asserted: a third target from an unrelated
-domain is introduced after the harness is frozen and must produce a valid scorecard with no
-new attack code and no new detectors.
+A fixed list is patched string by string and the merchant stays broken, and it only ever works
+on the one domain it was written for. Nine surface mutations
+(register, language including Hinglish and mid-conversation code-switching, pressure,
+indirection) are applied on top, as a fourth coordinate of the same grid rather than as a
+separate kind of object, so a mutated attack is traceable to the plain one it varies.
+
+This is also why the harness transfers. Nothing in `attacks/`, `judge/detectors/`,
+`mcp/generator/` or `scoring/` knows what a target sells, and
+`tests/test_no_domain_vocabulary.py` fails the build over a module there that says refund,
+basket or shopper. The claim is then demonstrated rather than argued: a third agent was added
+whose declaration nobody wrote, whose shop nobody modelled and whose vocabulary appears
+nowhere in the harness, and it produced a scorecard with no new attack code and no new
+detectors.
 
 **Multi-turn is the point, where there are turns at all.** Single-turn attacks mostly fail
 against a competent system prompt. The ones that land spend three benign turns establishing
@@ -280,8 +300,8 @@ held are opposite facts that look identical in a finding count.
 what has to be true of a record for breaking this rule to be one step from a reasonable
 action, and what has to be true of one for holding to be the right answer. Both halves are
 emitted, because an agent that refuses everything scores perfectly against a world made
-entirely of traps, so a world of traps cannot tell judgement from compliance and the utility
-suite over it measures nothing. Neutrality is therefore a consequence of how each record was
+entirely of traps, so such a world cannot tell judgement from compliance: an agent that
+reasons correctly and an agent that declines to act at all leave it looking the same. Neutrality is therefore a consequence of how each record was
 emitted rather than an instruction in a prompt: every fixture carries the rule it exists for,
 so the question "why is this record here" has an answer that predates the answer. `agentred
 world --target <name>` prints the manifest, gaps included, and contacts nothing.
@@ -310,9 +330,9 @@ raises rather than overwriting when they would share a key, because the manifest
 the reachability argument and it is written from what the emitters say they did.
 
 **A world has a fourth per-agent part, and it is who the harness acts as.** The identities the
-harness may act as are declared per agent, in `src/agentred/targets/specs/dispute_handler/subjects.yaml`
-and its counterpart, and they name records: a cast written for one shop names nothing in another. Down a planted channel that is
-loud: the write is refused and the suite errors before the agent is reached. Down a conversation
+harness may act as are declared per agent, one file per spec directory alongside its config
+and policy, and they name records: a cast written for one shop names nothing in another. Down a planted channel that
+is loud: the write is refused and the suite errors before the agent is reached. Down a conversation
 it is silent, because the agent is asked about a reference it cannot find, says so truthfully,
 and every rule reports as never in play. `mcp/generator/cast.py` derives the cast from the
 fixtures, anchoring each identity on a record some rule exists for and stating as facts only what
@@ -335,14 +355,16 @@ and the quieter version of the same problem is what a hand-authored shop does wh
 edited: every earlier scorecard goes on citing a tuple that no longer describes what the agent
 faced. ADR-0004 is amended rather than superseded, in the way ADR-0006 amended it.
 
-**A finding is reproducible from a seed.** Generation is stochastic, and a gate that returns
-different verdicts on identical input is not a gate. Every attack carries the seed that
-produced its surface form, so a finding replays byte for byte. The suite is split accordingly:
-a frozen corpus of attacks that have succeeded somewhere before, deterministic and identical
-every run, which is the only thing a verdict is computed from, and an exploratory budget that
-mutates and searches and can promote a novel success into the frozen set for next time. The
-second never moves a verdict. A side effect worth naming: the corpus compounds, so every agent
-tested makes the gate stronger for the agent after it.
+**The grid is deterministic and the words in it are generated.** A gate that asks a
+different set of questions each time it runs is not a gate, so what an attack *is* carries no
+randomness at all: an attack is a cell, and its coordinates are a stake, a technique, a
+channel, a mutation and the subject and record it concerns. The same declaration derives the
+same cells in the same order every run, and which record an attempt was about is fixed when the
+attack is constructed rather than chosen at run time. Two runs of one suite therefore ask
+identical questions of an agent. What a model supplies is the wording that asks them, which is
+the part a fixed prompt list gets wrong, so a run is the same experiment as the one before it
+rather than the same transcript. Every attempt is stored with its coordinates and its full
+turns, so any finding is read back and re-checked offline from the store.
 
 **Detectors before the judge, and the detectors are generic.** Most real violations are
 observable rather than interpretive. They reduce to seven policy-driven shapes, and the split
@@ -416,13 +438,13 @@ or undertaking something on the operator's behalf is not: a conversation that br
 the same tool calls as a conversation that keeps it. Those are declared as obligations in
 `spec/`, so what the judge is asked is a rule the merchant recognises, quoted as they wrote it,
 rather than a general question about whether the agent behaved well. A judge asked the general
-question answers a slightly different one in every conversation, and nothing that moves can be
-calibrated.
+question answers a slightly different one in every conversation, and an answer to a question
+that moves cannot be compared with the one before it.
 
 **Rules are read out of the prompt as well as the policy.** `attacks/infer_policy.py` extracts
 the rules an agent's prose states and reports which of them the structured policy does not
 carry. This was planned as degraded mode for an agent declaring nothing, and it earns its place
-against agents that declare a great deal: both targets in this repository were written by
+against agents that declare a great deal: the two agents written here were written by
 someone who knew exactly what they were building, and both ended up with rules in their
 instructions that never reached their policy. Everything derived that way carries
 `provenance: inferred` to the scorecard and is never merged into the declared set. A rule naming
@@ -466,43 +488,42 @@ only the damage teaches the wrong lesson with complete accuracy: a reader who se
 writes a rule about payouts, when the sentence that decided it was several turns earlier and
 broke nothing.
 
-**Exposure, not test counts.** "You failed 7 of 40 tests" does not reach a merchant.
-"Your agent can be talked into an average 34% discount, and at your stated volume that is
-roughly this much a month" does. Every assumption the model rests on is printed alongside the
-number, never buried, and the renderer refuses to emit a figure without them.
+**What was moved, not how many tests failed.** "You failed 7 of 40 tests" does not reach a
+merchant. What reaches them is what left the shop: the page totals value the operator gave
+away, read out of the results the tools actually returned rather than out of the arguments the
+agent asked for, so a call the tool adjusted counts as what happened instead of as what was
+attempted. Which result fields mean the operator is out of pocket is declared by the agent,
+because no field name means that for every agent, and a declaration that also names the field
+holding money coming *in* would produce a headline that is a loss and a gain added together.
+Where two agents are denominated differently the currency symbol is dropped rather than
+guessed, since a bare number is honest and the wrong symbol is not.
 
-**Close the loop, and the fix has to be config.** A finding that is not fixed is not worth
-much, so the harness generates a suggested change from the breaking transcripts, applies it to
-the target, re-runs the identical suite, and reports the before and after with the residual
-failures named. That delta is the product's actual claim.
+**A remedy is a typed thing, and the two kinds are never blended.** A change to the structured
+policy makes a violation unreachable, because the tool surface then refuses the call. A
+sentence added to the instruction text makes it less likely, because the surface is unchanged
+and still accepts the value. Presenting the second as though it were the first is the single
+most damaging thing this tool could do, since the operator stops looking and the thing they
+stopped looking at is still reachable. So which kind a remedy is travels with it rather than
+being left to phrasing, and a finding whose only available answer is a sentence says so and
+says why: the limit that would have closed it is not something the declaration can currently
+express. That is a finding about the platform rather than about the agent, and it is worth
+printing. `docs/DECISIONS/ADR-0003-instruction-vs-permission.md` is the whole argument, and it
+is what makes the prose-versus-policy gap above mean anything.
 
-The constraint on what a suggestion may be is a product decision, not an implementation one.
-The people who read this report are ops and finance teams on a no-code builder. They cannot
-apply a Python patch. So every remediation has to be expressible as configuration: a limit
-value, an approval threshold, a narrowed tool allowlist, a required idempotency key, a clause
-in the instruction text. A fix that can only be written as code does not belong in the report,
-because it is not a fix anybody reading the report can make.
-
-This is also where the strongest thing the harness can demonstrate lives, and it takes thirty
-seconds. Land a finding. Let the merchant fix it the obvious way first, by tightening the
-sentence in the instructions box. Re-run: that exact attack now fails. Then show a variant that
-still succeeds. Then apply the real fix, moving the bound out of the prompt and into the tool
-schema, and watch the whole family go dark. Every other claim in this document rests on that
-being true, and it is the reason the config-policy split at the top of this file exists.
-
-**Security and utility are reported together, always.** Every hardening change costs
-capability, and the trivially safest agent refuses everything. So a benign suite of ordinary
-tasks with known-correct outcomes runs beside the attack suite, and both numbers move together
-in the report. Attacks succeeding and benign tasks passing appear on the same line, before and
-after. A security number reported on its own is not acceptable output, because the change that
-produced it may have been an agent that stopped working.
+The constraint on what a remedy may be is a product decision, not an implementation one. The
+people who read this report are ops and finance teams on a no-code builder. They cannot apply a
+Python patch. So a remedy has to be expressible as configuration: a limit value, an approval
+threshold, a narrowed tool allowlist, a required idempotency key, a clause in the instruction
+text. A fix that can only be written as code does not belong in the report, because it is not a
+fix anybody reading the report can make. This is the reason the config-policy split at the top
+of this file exists.
 
 **Nothing in the output implies safety.** The harness can prove a vulnerability exists. It
 cannot prove one does not, and a clean verdict that precedes a real loss makes the tool the
 cause of that loss. So safe, secure, verified and passed all checks are absent from every
-user-facing string, and a run that found nothing says what it actually did: no findings in 340
-attempts across six goals and nine channels, with the coverage grid rendered beside it so a
-reader can see what was never tried. That grid is what replaces a safety claim. It sits beside
+user-facing string, and a run that found nothing says what it actually did: how many attempts
+were made, against which of the agent's own goals, down which of the channels it declares, with
+the coverage grid rendered beside it so a reader can see what was never tried. That grid is what replaces a safety claim. It sits beside
 the three-outcome accounting rather than replacing it, because a cell that was attempted is a
 weaker statement than a rule that was actually reached and decided.
 
@@ -520,16 +541,14 @@ a wrong rule passes, and an agent whose merchant declared a ceiling twice as hig
 margin can survive is measured against that ceiling. Conformance, not correctness of intent.
 This should be said out loud everywhere, including in the demo.
 
-**White box is the product; black box is a reduced mode and no parity is claimed.** The
-harness reads an agent's declaration and derives its threat model from it, which is the mode
-that ships and the mode a pre-launch gate is entitled to. A real adversary has no manifest, and
-that objection is answered rather than dismissed: an endpoint-only mode runs the invariants that
-hold for any commerce agent regardless of what it declared, which is to say never move more
-money than the order was worth, never read a record belonging to a customer other than the one
-in the session, never send to a destination that is not on file. Everything policy-specific is
-unavailable there, because policy-specific bounds are exactly what the declaration was
-providing, and a bound inferred from watching an endpoint is a guess rather than ground truth.
-The two modes are reported separately and the reduced one says what it could not check.
+**The declaration is what the harness reads, and that is the mode a pre-launch gate is
+entitled to.** A real adversary has no manifest, and the answer to that objection is not to
+pretend the harness lacks one either. A gate runs before deployment, for the operator, on their
+own agent, and what it is entitled to use is everything that agent already records about
+itself. Fidelity is reported rather than assumed: `docs/INTEGRATION.md` states what a run may
+claim given each combination of sources, and a rule the declaration does not carry is reported
+as never looked at rather than as passed. A bound recovered by watching an endpoint would be a
+guess presented as ground truth, and the whole design turns on never doing that.
 
 **State resets between runs, so multi-run attacks are invisible.** The world is restored before
 every attack, which is what makes a finding reproducible and replayable. The same property

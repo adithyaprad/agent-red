@@ -6,7 +6,7 @@
 # recorded as costing nothing is a tool no attack is aimed at, so the answer that ends the
 # conversation fastest is also the one that quietly empties the suite.
 
-answered_by: fde
+answered_by: operations
 consequences:
   get_subscription: disclosure
   get_customer: disclosure

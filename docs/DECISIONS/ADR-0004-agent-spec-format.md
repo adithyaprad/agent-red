@@ -126,8 +126,8 @@ Rejected.
 
 **Policy as prose only, with everything inferred.** This is what many agents will actually
 ship, and it is why degraded mode exists. As the primary format it is unusable: an inferred
-bound cannot be tightened, so the loop never closes, and the calibration numbers would be
-measuring the extractor rather than the agent.
+bound cannot be tightened, so no remedy follows a finding, and the result measures the
+extractor rather than the agent.
 
 **Modelling tool parameters instead of storing JSON Schema verbatim.** The only question
 the validator asks of a schema is whether an argument exists. Re-modelling would let

@@ -1,10 +1,10 @@
 """What a check produces, whether a detector asserted it or a model judged it.
 
-One shape for both, deliberately. A scorecard mixes assertions and opinions, a human labels
-both from the same screen, and the store keeps both in one table, so a verdict that changed
-shape depending on who produced it would push that distinction into every consumer. It is
-carried as a field instead: `settled_by` says whether anybody had to form an opinion, and
-`confidence` is only ever set by the one who did.
+One shape for both, deliberately. A scorecard mixes assertions and opinions and a reader
+compares them side by side, so a verdict that changed shape depending on who produced it
+would push that distinction into every consumer. It is carried as a field instead:
+`settled_by` says whether anybody had to form an opinion, and `confidence` is only ever set
+by the one who did.
 
 **The third outcome is the point of this module.** A check has three answers, not two: the
 rule was broken, the rule held, or the rule was never in play. Collapsing the third into the
